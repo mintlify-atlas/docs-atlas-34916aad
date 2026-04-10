@@ -1,0 +1,184 @@
+---
+title: "Benchmarking algorithms across environments"
+description: "Use cleanrl_utils.benchmark to run multi-seed experiments across environments locally or on Slurm clusters with automatic W&B version tagging."
+---
+
+`cleanrl_utils.benchmark` is a scheduling utility that runs a CleanRL training command against multiple environments and random seeds in parallel. It handles subprocess management, auto-tagging with version control metadata, and Slurm job submission — so you can focus on the experiment rather than the orchestration.
+
+## CLI reference
+
+```bash
+python -m cleanrl_utils.benchmark --help
+```
+
+```
+usage: benchmark.py [-h] --env-ids [STR [STR ...]] --command STR
+                    [--num-seeds INT] [--start-seed INT] [--workers INT]
+                    [--auto-tag | --no-auto-tag]
+                    [--slurm-template-path STR]
+                    [--slurm-gpus-per-task INT]
+                    [--slurm-total-cpus INT]
+                    [--slurm-ntasks INT]
+                    [--slurm-nodes INT]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--env-ids` | required | Space-separated list of environment IDs to benchmark |
+| `--command` | required | Training command to run (without `--env-id` or `--seed`) |
+| `--num-seeds` | `3` | Number of random seeds per environment |
+| `--start-seed` | `1` | Seed value for the first run |
+| `--workers` | `0` | Number of parallel subprocesses (0 = print only, do not run) |
+| `--auto-tag` | `True` | Tag W&B runs with git tag, commit hash, and PR number |
+| `--slurm-template-path` | `None` | Path to a Slurm job template file |
+| `--slurm-gpus-per-task` | `None` | GPUs per Slurm task |
+| `--slurm-total-cpus` | `None` | Total CPUs per Slurm job |
+| `--slurm-ntasks` | `None` | Number of Slurm tasks per job |
+| `--slurm-nodes` | `None` | Number of Slurm nodes per job |
+
+## Local benchmarks
+
+### Classic control
+
+Run PPO across three classic control environments with 3 seeds each, using up to 5 parallel workers:
+
+```bash
+OMP_NUM_THREADS=1 xvfb-run -a python -m cleanrl_utils.benchmark \
+    --env-ids CartPole-v1 Acrobot-v1 MountainCar-v0 \
+    --command "uv run python cleanrl/ppo.py --no_cuda --track --capture_video" \
+    --num-seeds 3 \
+    --workers 5
+```
+
+This expands to the following 9 commands, executed in parallel across 5 subprocesses:
+
+```bash
+uv run python cleanrl/ppo.py --no_cuda --track --capture_video --env-id CartPole-v1 --seed 1
+uv run python cleanrl/ppo.py --no_cuda --track --capture_video --env-id Acrobot-v1 --seed 1
+uv run python cleanrl/ppo.py --no_cuda --track --capture_video --env-id MountainCar-v0 --seed 1
+uv run python cleanrl/ppo.py --no_cuda --track --capture_video --env-id CartPole-v1 --seed 2
+uv run python cleanrl/ppo.py --no_cuda --track --capture_video --env-id Acrobot-v1 --seed 2
+uv run python cleanrl/ppo.py --no_cuda --track --capture_video --env-id MountainCar-v0 --seed 2
+uv run python cleanrl/ppo.py --no_cuda --track --capture_video --env-id CartPole-v1 --seed 3
+uv run python cleanrl/ppo.py --no_cuda --track --capture_video --env-id Acrobot-v1 --seed 3
+uv run python cleanrl/ppo.py --no_cuda --track --capture_video --env-id MountainCar-v0 --seed 3
+```
+
+<AccordionGroup>
+  <Accordion title="Why OMP_NUM_THREADS=1 and xvfb-run?">
+    **`OMP_NUM_THREADS=1`** tells PyTorch to use a single thread per subprocess. Without this, multiple workers compete for CPU cores and slow each other down.
+
+    **`xvfb-run -a`** creates a virtual display, which is required when recording videos (`--capture_video`) on a headless Linux server with no physical display attached.
+  </Accordion>
+</AccordionGroup>
+
+### High-throughput environments (envpool)
+
+When using fast vectorized environments such as envpool, the environment itself saturates the CPU. Use `--workers 1` to avoid contention:
+
+```bash
+xvfb-run -a python -m cleanrl_utils.benchmark \
+    --env-ids Pong-v5 BeamRider-v5 Breakout-v5 \
+    --command "uv run python cleanrl/ppo_atari_envpool.py --track --capture_video" \
+    --num-seeds 3 \
+    --workers 1
+```
+
+<Tip>
+For envpool and ProcGen experiments, `--workers 1` typically gives higher steps-per-second than parallelizing across subprocesses, because the environment already uses all available CPU cores internally.
+</Tip>
+
+## Auto-tagging with version control
+
+`--auto-tag` (enabled by default) reads the current git state and sets the `WANDB_TAGS` environment variable before launching runs. This attaches version control metadata to every W&B run, making it easy to compare results across code versions:
+
+- **Git tag** — for example, `v1.0.0b2-8-g6081d30`
+- **Commit hash fallback** — `no-tag-{commit_count}-g{short_hash}` when no tag exists
+- **Pull request number** — for example, `pr-299`, resolved via the GitHub API
+
+Disable auto-tagging with `--no-auto-tag` if you do not want W&B tags set.
+
+## Slurm cluster integration
+
+If you have access to a Slurm cluster, pass a template file and Slurm resource flags. The utility generates a job script, fills in the template variables, and submits it with `sbatch`.
+
+### Slurm template format
+
+The template file uses `{{placeholder}}` syntax. Create a file like `benchmark/cleanrl_1gpu.slurm_template`:
+
+```bash benchmark/cleanrl_1gpu.slurm_template
+#!/bin/bash
+#SBATCH --job-name=low-priority
+#SBATCH --partition=production-cluster
+#SBATCH --gpus-per-task={{gpus_per_task}}
+#SBATCH --cpus-per-gpu={{cpus_per_gpu}}
+#SBATCH --ntasks={{ntasks}}
+#SBATCH --output=slurm/logs/%x_%j.out
+#SBATCH --array={{array}}
+#SBATCH --mem-per-cpu=12G
+{{nodes}}
+
+env_ids={{env_ids}}
+seeds={{seeds}}
+env_id=${env_ids[$SLURM_ARRAY_TASK_ID / {{len_seeds}}]}
+seed=${seeds[$SLURM_ARRAY_TASK_ID % {{len_seeds}}]}
+
+echo "Running task $SLURM_ARRAY_TASK_ID with env_id: $env_id and seed: $seed"
+
+srun {{command}} --env-id $env_id --seed $seed
+```
+
+The benchmark utility substitutes the following placeholders:
+
+| Placeholder | Value |
+|-------------|-------|
+| `{{array}}` | Slurm array range, e.g. `0-8%9` |
+| `{{env_ids}}` | Bash array of environment IDs |
+| `{{seeds}}` | Bash array of seed values |
+| `{{len_seeds}}` | Number of seeds |
+| `{{command}}` | The `--command` string |
+| `{{gpus_per_task}}` | Value of `--slurm-gpus-per-task` |
+| `{{cpus_per_gpu}}` | Computed as `ceil(total_cpus / (gpus * ntasks))` |
+| `{{ntasks}}` | Value of `--slurm-ntasks` |
+| `{{nodes}}` | `#SBATCH --nodes=N` line, or empty if not set |
+
+### Submitting Slurm jobs
+
+```bash
+OMP_NUM_THREADS=1 xvfb-run -a uv run python -m cleanrl_utils.benchmark \
+    --env-ids CartPole-v1 Acrobot-v1 MountainCar-v0 \
+    --command "uv run python cleanrl/ppo.py --no_cuda --track --capture_video" \
+    --num-seeds 3 \
+    --workers 9 \
+    --slurm-gpus-per-task 1 \
+    --slurm-ntasks 1 \
+    --slurm-total-cpus 10 \
+    --slurm-template-path benchmark/cleanrl_1gpu.slurm_template
+```
+
+The generated script is saved to `slurm/<uuid>.slurm` and submitted automatically when `--workers > 0`. The resulting Slurm script looks like:
+
+```bash generated slurm script
+#!/bin/bash
+#SBATCH --job-name=low-priority
+#SBATCH --partition=production-cluster
+#SBATCH --gpus-per-task=1
+#SBATCH --cpus-per-gpu=10
+#SBATCH --ntasks=1
+#SBATCH --output=slurm/logs/%x_%j.out
+#SBATCH --array=0-8%9
+#SBATCH --mem-per-cpu=12G
+
+env_ids=(CartPole-v1 Acrobot-v1 MountainCar-v0)
+seeds=(1 2 3)
+env_id=${env_ids[$SLURM_ARRAY_TASK_ID / 3]}
+seed=${seeds[$SLURM_ARRAY_TASK_ID % 3]}
+
+echo "Running task $SLURM_ARRAY_TASK_ID with env_id: $env_id and seed: $seed"
+
+srun uv run python cleanrl/ppo.py --no_cuda --track --env-id $env_id --seed $seed
+```
+
+<Note>
+Set `--workers 0` to generate and print the Slurm script without submitting it. This is useful for reviewing the generated script before running it on the cluster.
+</Note>

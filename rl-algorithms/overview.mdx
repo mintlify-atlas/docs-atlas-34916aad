@@ -1,0 +1,56 @@
+---
+title: "RL algorithms overview — CleanRL implementations"
+description: "A complete reference of all reinforcement learning algorithms in CleanRL, each implemented as a single self-contained Python file with benchmarked results."
+---
+
+CleanRL provides single-file implementations of popular deep reinforcement learning algorithms. Every file is self-contained — you can read one file and understand the full algorithm without jumping across modules. Benchmarked results are available at [benchmark.cleanrl.dev](https://benchmark.cleanrl.dev).
+
+<Note>
+  All implementations are benchmarked against reference implementations. Results are tracked at [benchmark.cleanrl.dev](https://benchmark.cleanrl.dev).
+</Note>
+
+## Algorithms
+
+<CardGroup cols={2}>
+  <Card title="Proximal Policy Gradient (PPO)" icon="chart-line" href="/rl-algorithms/ppo">
+    On-policy algorithm with clipped surrogate objective. Supports classic control, Atari, continuous action spaces, multi-GPU, and multi-agent environments. 10 variants.
+  </Card>
+  <Card title="Deep Q-Learning (DQN)" icon="brain" href="/rl-algorithms/dqn">
+    Off-policy value-based algorithm using a replay buffer and target network. Supports classic control and Atari. PyTorch and JAX variants available. 4 variants.
+  </Card>
+  <Card title="Categorical DQN (C51)" icon="chart-bar" href="/rl-algorithms/c51">
+    Distributional RL extension of DQN that learns a full return distribution instead of a scalar value. Supports classic control and Atari. PyTorch and JAX variants. 4 variants.
+  </Card>
+  <Card title="Soft Actor-Critic (SAC)" icon="rotate" href="/rl-algorithms/sac">
+    Off-policy maximum-entropy algorithm for continuous action spaces. Stable and sample-efficient. 2 variants.
+  </Card>
+  <Card title="Deep Deterministic Policy Gradient (DDPG)" icon="arrow-trend-up" href="/rl-algorithms/ddpg">
+    Off-policy actor-critic algorithm for continuous action spaces. PyTorch and JAX variants. 2 variants.
+  </Card>
+  <Card title="Twin Delayed DDPG (TD3)" icon="arrows-split-up-and-left" href="/rl-algorithms/td3">
+    Improves DDPG with twin critics, delayed policy updates, and target policy smoothing. PyTorch and JAX variants. 2 variants.
+  </Card>
+  <Card title="Phasic Policy Gradient (PPG)" icon="layer-group" href="/rl-algorithms/ppg">
+    Separates policy and value learning into alternating phases. Designed for ProcGen environments. 1 variant.
+  </Card>
+  <Card title="Random Network Distillation (RND)" icon="lightbulb" href="/rl-algorithms/ppo-rnd">
+    Exploration bonus via prediction error on a random network. Built on top of PPO with EnvPool. 1 variant.
+  </Card>
+  <Card title="Qdagger" icon="graduation-cap" href="https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/qdagger_dqn_atari_impalacnn.py">
+    Offline-to-online RL via knowledge distillation from a DQN teacher. PyTorch and JAX variants for Atari. 2 variants.
+  </Card>
+</CardGroup>
+
+## All variants
+
+| Algorithm | Variants |
+|-----------|----------|
+| [PPO](/rl-algorithms/ppo) | `ppo.py`, `ppo_atari.py`, `ppo_continuous_action.py`, `ppo_atari_lstm.py`, `ppo_atari_envpool.py`, `ppo_atari_envpool_xla_jax.py`, `ppo_atari_envpool_xla_jax_scan.py`, `ppo_procgen.py`, `ppo_atari_multigpu.py`, `ppo_pettingzoo_ma_atari.py`, `ppo_continuous_action_isaacgym.py` |
+| [DQN](/rl-algorithms/dqn) | `dqn.py`, `dqn_atari.py`, `dqn_jax.py`, `dqn_atari_jax.py` |
+| [C51](/rl-algorithms/c51) | `c51.py`, `c51_atari.py`, `c51_jax.py`, `c51_atari_jax.py` |
+| SAC | `sac_continuous_action.py`, `sac_atari.py` |
+| DDPG | `ddpg_continuous_action.py`, `ddpg_continuous_action_jax.py` |
+| TD3 | `td3_continuous_action.py`, `td3_continuous_action_jax.py` |
+| PPG | `ppg_procgen.py` |
+| RND | `ppo_rnd_envpool.py` |
+| Qdagger | `qdagger_dqn_atari_impalacnn.py`, `qdagger_dqn_atari_jax_impalacnn.py` |

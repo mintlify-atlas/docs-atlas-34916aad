@@ -1,0 +1,112 @@
+---
+title: "CleanRL: Single-file Deep Reinforcement Learning"
+description: "CleanRL provides single-file deep RL implementations with Tensorboard, W&B tracking, and reproducibility. Covers PPO, DQN, SAC, TD3, DDPG, C51, and PPG."
+---
+
+CleanRL is a deep reinforcement learning library built for researchers and practitioners who want to understand exactly how algorithms work. Unlike modular RL libraries, every implementation detail of an algorithm variant lives in a single, self-contained Python file — making it easy to read, modify, and extend without navigating complex class hierarchies.
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/get-started/installation">
+    Install CleanRL and set up your environment in minutes
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/get-started/quickstart">
+    Run your first PPO experiment on CartPole
+  </Card>
+  <Card title="RL Algorithms" icon="brain" href="/rl-algorithms/overview">
+    Browse all implemented algorithms: PPO, DQN, SAC, TD3, DDPG, C51, PPG
+  </Card>
+  <Card title="Experiment Tracking" icon="chart-line" href="/get-started/experiment-tracking">
+    Track experiments with Tensorboard and Weights & Biases
+  </Card>
+</CardGroup>
+
+## Why CleanRL?
+
+CleanRL is designed around a single principle: **every implementation detail should be visible in one file**. This makes it ideal for:
+
+- **Learning**: Read `ppo_atari.py` (340 lines) to understand exactly how PPO works on Atari games — no hunting through multiple modules
+- **Research**: Prototype new ideas by modifying a single file, with minimal boilerplate to work around
+- **Reproducibility**: Seeded experiments, Tensorboard logging, and W&B integration are built in from the start
+
+<Note>
+CleanRL is **not** a modular library and is not meant to be imported as a dependency. It is a collection of reference implementations. If you need a production-grade modular library, consider [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3).
+</Note>
+
+## Algorithms at a glance
+
+CleanRL includes benchmarked implementations of 7+ algorithms across 34+ environments:
+
+<CardGroup cols={2}>
+  <Card title="PPO" icon="layer-group" href="/rl-algorithms/ppo">
+    Proximal Policy Optimization — discrete, continuous, Atari, MuJoCo, multi-GPU
+  </Card>
+  <Card title="DQN" icon="network-wired" href="/rl-algorithms/dqn">
+    Deep Q-Learning — classic control and Atari, with JAX variants
+  </Card>
+  <Card title="SAC" icon="arrows-spin" href="/rl-algorithms/sac">
+    Soft Actor-Critic — continuous action spaces and Atari
+  </Card>
+  <Card title="TD3 & DDPG" icon="sliders" href="/rl-algorithms/td3">
+    Deterministic policy gradients for continuous control
+  </Card>
+  <Card title="C51" icon="chart-bar" href="/rl-algorithms/c51">
+    Categorical DQN with distributional value learning
+  </Card>
+  <Card title="PPG" icon="code-branch" href="/rl-algorithms/ppg">
+    Phasic Policy Gradient for ProcGen environments
+  </Card>
+</CardGroup>
+
+## Get started
+
+<Steps>
+  <Step title="Install CleanRL">
+    Clone the repository and install dependencies with `uv`:
+    ```bash
+    git clone https://github.com/vwxyzjn/cleanrl.git && cd cleanrl
+    uv pip install .
+    ```
+  </Step>
+  <Step title="Run your first experiment">
+    Train a PPO agent on CartPole in under a minute:
+    ```bash
+    uv run python cleanrl/ppo.py \
+        --seed 1 \
+        --env-id CartPole-v1 \
+        --total-timesteps 50000
+    ```
+  </Step>
+  <Step title="Visualize results">
+    Open Tensorboard to view training metrics:
+    ```bash
+    tensorboard --logdir runs
+    ```
+  </Step>
+  <Step title="Track with Weights & Biases">
+    Add the `--track` flag to log your run to W&B:
+    ```bash
+    uv run python cleanrl/ppo.py \
+        --env-id CartPole-v1 \
+        --total-timesteps 50000 \
+        --track \
+        --wandb-project-name my-cleanrl-project
+    ```
+  </Step>
+</Steps>
+
+## Research and citation
+
+CleanRL is published in the Journal of Machine Learning Research. If you use CleanRL in your work, please cite:
+
+```bibtex
+@article{huang2022cleanrl,
+  author  = {Shengyi Huang and Rousslan Fernand Julien Dossa and Chang Ye and Jeff Braga and Dipam Chakraborty and Kinal Mehta and João G.M. Araújo},
+  title   = {CleanRL: High-quality Single-file Implementations of Deep Reinforcement Learning Algorithms},
+  journal = {Journal of Machine Learning Research},
+  year    = {2022},
+  volume  = {23},
+  number  = {274},
+  pages   = {1--18},
+  url     = {http://jmlr.org/papers/v23/21-1342.html}
+}
+```

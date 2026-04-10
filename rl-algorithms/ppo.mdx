@@ -1,0 +1,370 @@
+---
+title: "Proximal Policy Gradient (PPO) — CleanRL variants"
+description: "Single-file PPO implementations for classic control, Atari, continuous actions, LSTM, multi-GPU, and multi-agent environments with benchmarked results."
+---
+
+PPO is one of the most widely used deep reinforcement learning algorithms. It collects rollouts from vectorized environments, then optimizes a clipped surrogate objective over multiple epochs and mini-batches. CleanRL's PPO implementations follow the 13 core implementation details from [The 37 Implementation Details of Proximal Policy Optimization](https://iclr-blog-track.github.io/2022/03/25/ppo-implementation-details/), mirroring the code-level optimizations in `openai/baselines`.
+
+**Original paper:** [Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347) (Schulman et al., 2017)
+
+**Reference resources:**
+
+- [Implementation Matters in Deep Policy Gradients: A Case Study on PPO and TRPO](https://arxiv.org/abs/2005.12729)
+- [What Matters In On-Policy Reinforcement Learning? A Large-Scale Empirical Study](https://arxiv.org/abs/2006.05990)
+- [The 37 Implementation Details of Proximal Policy Optimization](https://iclr-blog-track.github.io/2022/03/25/ppo-implementation-details/)
+
+## Variants
+
+<CardGroup cols={2}>
+  <Card title="ppo.py" icon="gamepad-2" href="#ppopy">
+    Classic control tasks. Discrete action space, MLP network.
+  </Card>
+  <Card title="ppo_atari.py" icon="tv" href="#ppo_ataripy">
+    Atari games. CNN + frame stacking, pixel observations.
+  </Card>
+  <Card title="ppo_continuous_action.py" icon="sliders" href="#ppo_continuous_actionpy">
+    Continuous action spaces. MuJoCo-specific optimizations included.
+  </Card>
+  <Card title="ppo_atari_lstm.py" icon="brain" href="#ppo_atari_lstmpy">
+    Atari with LSTM. Recurrent policy without frame stacking.
+  </Card>
+  <Card title="ppo_atari_envpool.py" icon="bolt" href="#ppo_atari_envpoolpy">
+    Atari with EnvPool for high-throughput vectorized environments.
+  </Card>
+  <Card title="ppo_atari_envpool_xla_jax.py" icon="microchip" href="#ppo_atari_envpool_xla_jaxpy">
+    EnvPool + JAX XLA interface. Maximum throughput on GPU.
+  </Card>
+  <Card title="ppo_procgen.py" icon="shapes" href="#ppo_procgenpy">
+    ProcGen environments with IMPALA CNN architecture.
+  </Card>
+  <Card title="ppo_atari_multigpu.py" icon="server" href="#ppo_atari_multigpupy">
+    Multi-GPU training via PyTorch DDP for Atari.
+  </Card>
+  <Card title="ppo_pettingzoo_ma_atari.py" icon="users" href="#ppo_pettingzoo_ma_ataripy">
+    Multi-agent Atari via PettingZoo's parallel API.
+  </Card>
+</CardGroup>
+
+## `ppo.py`
+
+[`ppo.py`](https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppo.py) targets classic control environments with discrete action spaces and low-dimensional observations.
+
+**Supports:**
+- `Box` observation space (low-level features)
+- `Discrete` action space
+- Environments like `CartPole-v1`, `Acrobot-v1`, `MountainCar-v0`
+
+### Installation and usage
+
+<CodeGroup>
+
+```bash uv
+uv pip install .
+uv run python cleanrl/ppo.py --env-id CartPole-v1
+```
+
+```bash pip
+pip install .
+python cleanrl/ppo.py --env-id CartPole-v1
+```
+
+</CodeGroup>
+
+### Key hyperparameters
+
+<AccordionGroup>
+  <Accordion title="Algorithm hyperparameters">
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--env-id` | `CartPole-v1` | Gymnasium environment ID |
+| `--total-timesteps` | `500000` | Total environment steps |
+| `--learning-rate` | `2.5e-4` | Adam optimizer learning rate |
+| `--num-envs` | `4` | Number of parallel environments |
+| `--num-steps` | `128` | Steps per environment per rollout |
+| `--anneal-lr` | `True` | Anneal learning rate to zero over training |
+| `--gamma` | `0.99` | Discount factor |
+| `--gae-lambda` | `0.95` | GAE lambda for advantage estimation |
+| `--num-minibatches` | `4` | Number of mini-batches per update |
+| `--update-epochs` | `4` | Number of optimization epochs per rollout |
+| `--clip-coef` | `0.2` | PPO clipping coefficient |
+| `--ent-coef` | `0.01` | Entropy bonus coefficient |
+| `--vf-coef` | `0.5` | Value function loss coefficient |
+| `--max-grad-norm` | `0.5` | Gradient clipping threshold |
+
+  </Accordion>
+  <Accordion title="Tracking and logging">
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--track` | `False` | Enable Weights & Biases tracking |
+| `--wandb-project-name` | `cleanRL` | W&B project name |
+| `--capture_video` | `False` | Record agent gameplay videos |
+| `--seed` | `1` | Random seed |
+
+  </Accordion>
+</AccordionGroup>
+
+### Benchmark results
+
+| Environment | `ppo.py` | openai/baselines PPO |
+|-------------|----------|----------------------|
+| CartPole-v1 | 490.04 ± 6.12 | 497.54 ± 4.02 |
+| Acrobot-v1 | -86.36 ± 1.32 | -81.82 ± 5.58 |
+| MountainCar-v0 | -200.00 ± 0.00 | -200.00 ± 0.00 |
+
+---
+
+## `ppo_atari.py`
+
+[`ppo_atari.py`](https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppo_atari.py) implements the 9 Atari-specific details from the 37 implementation details post, including `NoopResetEnv`, frame skipping, grayscale, frame stacking, and the Nature CNN architecture.
+
+**Supports:**
+- Atari pixel observations `(210, 160, 3)`
+- `Discrete` action space
+
+### Installation and usage
+
+<CodeGroup>
+
+```bash uv
+uv pip install ".[atari]"
+uv run python cleanrl/ppo_atari.py --env-id BreakoutNoFrameskip-v4
+```
+
+```bash pip
+pip install -r requirements/requirements-atari.txt
+python cleanrl/ppo_atari.py --env-id BreakoutNoFrameskip-v4
+```
+
+</CodeGroup>
+
+### Benchmark results
+
+| Environment | `ppo_atari.py` | openai/baselines PPO |
+|-------------|----------------|----------------------|
+| BreakoutNoFrameskip-v4 | 414.66 ± 28.09 | 406.57 ± 31.55 |
+| PongNoFrameskip-v4 | 20.36 ± 0.20 | 20.51 ± 0.50 |
+
+---
+
+## `ppo_continuous_action.py`
+
+[`ppo_continuous_action.py`](https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppo_continuous_action.py) supports continuous action spaces and includes MuJoCo-specific code-level optimizations (observation normalization, reward normalization, action clipping).
+
+**Supports:**
+- `Box` observation space (low-level features)
+- `Box` continuous action space
+- MuJoCo environments like `HalfCheetah-v4`, `Hopper-v4`, `Walker2d-v4`
+
+### Installation and usage
+
+<CodeGroup>
+
+```bash uv
+uv pip install ".[mujoco]"
+uv run python cleanrl/ppo_continuous_action.py --env-id HalfCheetah-v4
+```
+
+```bash pip
+pip install -r requirements/requirements-mujoco.txt
+python cleanrl/ppo_continuous_action.py --env-id HalfCheetah-v4
+```
+
+</CodeGroup>
+
+---
+
+## `ppo_atari_lstm.py`
+
+[`ppo_atari_lstm.py`](https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppo_atari_lstm.py) replaces frame stacking with an LSTM layer, enabling the agent to learn temporal dependencies across frames.
+
+**Supports:**
+- Atari pixel observations
+- `Discrete` action space
+- Recurrent policy (no frame stacking required)
+
+### Installation and usage
+
+<CodeGroup>
+
+```bash uv
+uv pip install ".[atari]"
+uv run python cleanrl/ppo_atari_lstm.py --env-id BreakoutNoFrameskip-v4
+```
+
+```bash pip
+pip install -r requirements/requirements-atari.txt
+python cleanrl/ppo_atari_lstm.py --env-id BreakoutNoFrameskip-v4
+```
+
+</CodeGroup>
+
+---
+
+## `ppo_atari_envpool.py`
+
+[`ppo_atari_envpool.py`](https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppo_atari_envpool.py) replaces Gymnasium's vectorized environments with [EnvPool](https://github.com/sail-sg/envpool), achieving significantly higher environment throughput.
+
+**Supports:**
+- Atari environments via EnvPool
+- `Discrete` action space
+- Linux only (EnvPool does not support Windows or macOS)
+
+### Installation and usage
+
+<CodeGroup>
+
+```bash uv
+uv pip install ".[atari, envpool]"
+uv run python cleanrl/ppo_atari_envpool.py --env-id BreakoutNoFrameskip-v4
+```
+
+```bash pip
+pip install -r requirements/requirements-atari.txt
+pip install envpool
+python cleanrl/ppo_atari_envpool.py --env-id BreakoutNoFrameskip-v4
+```
+
+</CodeGroup>
+
+<Warning>
+  EnvPool only runs on Linux. Use `ppo_atari.py` on macOS or Windows.
+</Warning>
+
+---
+
+## `ppo_atari_envpool_xla_jax.py`
+
+[`ppo_atari_envpool_xla_jax.py`](https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppo_atari_envpool_xla_jax.py) uses EnvPool's XLA interface to keep data on the GPU across the entire training loop, eliminating CPU–GPU transfers. The policy and optimizer run in JAX.
+
+**Supports:**
+- Atari via EnvPool XLA interface
+- Full JAX/Flax/Optax training loop
+- Maximum GPU throughput
+
+### Installation and usage
+
+<CodeGroup>
+
+```bash uv
+uv pip install ".[atari, envpool, jax]"
+uv pip install --upgrade "jax[cuda11_cudnn82]==0.4.8" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+uv run python cleanrl/ppo_atari_envpool_xla_jax.py --env-id BreakoutNoFrameskip-v4
+```
+
+```bash pip
+pip install -r requirements/requirements-atari.txt
+pip install -r requirements/requirements-jax.txt
+pip install envpool
+pip install --upgrade "jax[cuda]==0.3.17" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+python cleanrl/ppo_atari_envpool_xla_jax.py --env-id BreakoutNoFrameskip-v4
+```
+
+</CodeGroup>
+
+<Warning>
+  JAX does not support Windows. Use Windows Subsystem for Linux (WSL) if needed.
+</Warning>
+
+---
+
+## `ppo_procgen.py`
+
+[`ppo_procgen.py`](https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppo_procgen.py) targets [ProcGen](https://github.com/openai/procgen) environments using the IMPALA CNN architecture.
+
+**Supports:**
+- ProcGen environments (procedurally generated)
+- `Discrete` action space
+
+### Installation and usage
+
+<CodeGroup>
+
+```bash uv
+uv pip install ".[procgen]"
+uv run python cleanrl/ppo_procgen.py --env-id starpilot
+```
+
+```bash pip
+pip install -r requirements/requirements-procgen.txt
+python cleanrl/ppo_procgen.py --env-id starpilot
+```
+
+</CodeGroup>
+
+---
+
+## `ppo_atari_multigpu.py`
+
+[`ppo_atari_multigpu.py`](https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppo_atari_multigpu.py) distributes training across multiple GPUs using PyTorch Distributed Data Parallel (DDP). Each GPU runs its own set of environments and synchronizes gradients.
+
+**Supports:**
+- Atari environments
+- Multi-GPU via `torch.distributed`
+- `Discrete` action space
+
+### Installation and usage
+
+<CodeGroup>
+
+```bash uv
+uv pip install ".[atari]"
+uv run torchrun --standalone --nnodes=1 --nproc_per_node=2 cleanrl/ppo_atari_multigpu.py --env-id BreakoutNoFrameskip-v4
+```
+
+```bash pip
+pip install -r requirements/requirements-atari.txt
+torchrun --standalone --nnodes=1 --nproc_per_node=2 cleanrl/ppo_atari_multigpu.py --env-id BreakoutNoFrameskip-v4
+```
+
+</CodeGroup>
+
+<Tip>
+  Adjust `--nproc_per_node` to match the number of GPUs available on your machine.
+</Tip>
+
+---
+
+## `ppo_pettingzoo_ma_atari.py`
+
+[`ppo_pettingzoo_ma_atari.py`](https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppo_pettingzoo_ma_atari.py) trains agents in multi-agent Atari environments using [PettingZoo](https://pettingzoo.farama.org/)'s parallel API. A shared parameter agent plays against itself.
+
+**Supports:**
+- PettingZoo multi-agent Atari environments
+- Parameter sharing across agents
+- `Discrete` action space
+
+### Installation and usage
+
+<CodeGroup>
+
+```bash uv
+uv pip install ".[atari, pettingzoo]"
+uv run python cleanrl/ppo_pettingzoo_ma_atari.py --env-id pong_v3
+```
+
+```bash pip
+pip install -r requirements/requirements-atari.txt
+pip install -r requirements/requirements-pettingzoo.txt
+python cleanrl/ppo_pettingzoo_ma_atari.py --env-id pong_v3
+```
+
+</CodeGroup>
+
+## Logged metrics
+
+All PPO variants record these metrics to Tensorboard and optionally Weights & Biases:
+
+| Metric | Description |
+|--------|-------------|
+| `charts/episodic_return` | Episodic return of the agent |
+| `charts/episodic_length` | Episode length in steps |
+| `charts/SPS` | Environment steps per second |
+| `charts/learning_rate` | Current learning rate |
+| `losses/value_loss` | Mean value function loss |
+| `losses/policy_loss` | Mean policy (actor) loss |
+| `losses/entropy` | Mean entropy of the policy |
+| `losses/approx_kl` | Approximate KL divergence (k3 estimator) |
+| `losses/clipfrac` | Fraction of samples that triggered clipping |
+| `losses/explained_variance` | Explained variance of the value function |

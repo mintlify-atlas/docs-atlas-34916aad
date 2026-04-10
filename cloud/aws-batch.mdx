@@ -1,0 +1,243 @@
+---
+title: "AWS Batch: Submit and Manage Cloud Experiments"
+description: "Provision AWS Batch with Terraform, build and push Docker images, and submit CleanRL experiments to CPU or GPU spot instance queues with W&B tracking."
+---
+
+`cleanrl_utils.submit_exp` is a command-line tool that wraps the AWS Batch API and Docker to submit CleanRL training jobs to the cloud. It handles job definition registration, environment variable injection (including your W&B key), resource allocation, and automatic cleanup of transient job definitions.
+
+## Prerequisites
+
+Install CleanRL with the `cloud` extras, which adds `boto3`, `wandb`, and other cloud dependencies:
+
+```bash
+uv pip install ".[cloud]"
+```
+
+You also need:
+- AWS CLI configured: `python -m awscli configure`
+- Terraform ≥ 0.14.9 installed ([installation guide](https://learn.hashicorp.com/tutorials/terraform/install-cli))
+- Docker with `buildx` support
+- A Weights & Biases account; run `wandb login` so your credentials are stored in `~/.netrc`
+
+## Setup
+
+<Steps>
+  <Step title="Install cloud dependencies">
+    ```bash
+    uv pip install ".[cloud]"
+    ```
+  </Step>
+  <Step title="Configure AWS credentials">
+    ```bash
+    python -m awscli configure
+    ```
+    Follow the prompts to enter your AWS access key, secret, and default region.
+  </Step>
+  <Step title="Provision AWS Batch infrastructure">
+    From the root of the CleanRL repository, apply the Terraform configuration:
+    ```bash
+    cd cloud
+    terraform init
+    export AWS_DEFAULT_REGION=$(aws configure get region --profile default)
+    terraform apply
+    ```
+    This creates compute environments and job queues for CPU and GPU instance families. You are not charged until you submit jobs.
+  </Step>
+  <Step title="Log in to your Docker registry">
+    Set up `buildx` and authenticate so you can push images:
+    ```bash
+    docker buildx create --use
+    docker login
+    ```
+  </Step>
+</Steps>
+
+<Note>
+`terraform apply` creates the AWS Batch resources for free. Costs only accrue when EC2 instances run your submitted jobs.
+</Note>
+
+## Dry run: inspect the generated command
+
+Before submitting to AWS, do a dry run to verify the Docker command that will be executed:
+
+```bash
+uv run python -m cleanrl_utils.submit_exp \
+    --docker-tag vwxyzjn/cleanrl:latest \
+    --command "uv run python cleanrl/ppo.py --env-id CartPole-v1 --total-timesteps 100000 --track --capture_video" \
+    --num-seed 1
+```
+
+The printed command shows exactly what runs inside the container:
+
+```bash
+docker run -d --cpuset-cpus="0" \
+    -e WANDB_API_KEY=<your-key> \
+    vwxyzjn/cleanrl:latest \
+    /bin/bash -c "uv run python cleanrl/ppo.py --env-id CartPole-v1 --total-timesteps 100000 --track --capture_video --seed 1"
+```
+
+## Submitting experiments to AWS Batch
+
+### CPU experiments (spot instances)
+
+Use the `c5a-large-spot` queue for CPU-bound algorithms:
+
+```bash
+uv run python -m cleanrl_utils.submit_exp \
+    --docker-tag vwxyzjn/cleanrl:latest \
+    --command "uv run python cleanrl/ppo.py --env-id CartPole-v1 --total-timesteps 100000 --track --capture_video" \
+    --job-queue c5a-large-spot \
+    --num-seed 1 \
+    --num-vcpu 1 \
+    --num-memory 2000 \
+    --num-hours 48.0 \
+    --provider aws
+```
+
+### GPU experiments (spot instances)
+
+Use the `g4dn-xlarge-spot` queue for GPU-accelerated algorithms such as Atari:
+
+```bash
+uv run python -m cleanrl_utils.submit_exp \
+    --docker-tag vwxyzjn/cleanrl:latest \
+    --command "uv run python cleanrl/ppo_atari.py --env-id BreakoutNoFrameskip-v4 --track --capture_video" \
+    --job-queue g4dn-xlarge-spot \
+    --num-seed 1 \
+    --num-vcpu 1 \
+    --num-gpu 1 \
+    --num-memory 4000 \
+    --num-hours 48.0 \
+    --provider aws
+```
+
+### On-demand instances
+
+Replace the queue name with the non-`-spot` variant for uninterruptible jobs:
+
+<CodeGroup>
+
+```bash CPU on-demand
+uv run python -m cleanrl_utils.submit_exp \
+    --docker-tag vwxyzjn/cleanrl:latest \
+    --command "uv run python cleanrl/ppo.py --env-id CartPole-v1 --total-timesteps 100000 --track --capture_video" \
+    --job-queue c5a-large \
+    --num-seed 1 \
+    --num-vcpu 1 \
+    --num-memory 2000 \
+    --num-hours 48.0 \
+    --provider aws
+```
+
+```bash GPU on-demand
+uv run python -m cleanrl_utils.submit_exp \
+    --docker-tag vwxyzjn/cleanrl:latest \
+    --command "uv run python cleanrl/ppo_atari.py --env-id BreakoutNoFrameskip-v4 --track --capture_video" \
+    --job-queue g4dn-xlarge \
+    --num-seed 1 \
+    --num-vcpu 1 \
+    --num-gpu 1 \
+    --num-memory 4000 \
+    --num-hours 48.0 \
+    --provider aws
+```
+
+</CodeGroup>
+
+### Key flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--docker-tag` | `vwxyzjn/cleanrl:latest` | Docker image to run |
+| `--command` | `uv run python cleanrl/ppo.py` | Command executed inside the container |
+| `--job-queue` | `m6gd-medium` | AWS Batch job queue name |
+| `--num-seed` | `1` | Number of seeds; one job is submitted per seed |
+| `--num-vcpu` | `1` | vCPUs allocated per job |
+| `--num-memory` | `2000` | Memory in MB per job |
+| `--num-gpu` | `0` | GPUs allocated per job |
+| `--num-hours` | `16.0` | Maximum wall-clock hours before job timeout |
+| `--provider` | `""` | Set to `aws` to submit to AWS Batch |
+| `--build` / `-b` | `False` | Build a new Docker image before submitting |
+| `--push` / `-p` | `False` | Push the built image to the registry |
+| `--archs` | `linux/amd64` | Target platform(s) for multi-arch builds |
+
+## Building and pushing custom images
+
+If you have modified algorithm files or added dependencies, rebuild the image before submitting. The `--build` and `--push` flags handle this in a single command:
+
+```bash
+uv run python -m cleanrl_utils.submit_exp \
+    --docker-tag vwxyzjn/cleanrl:latest \
+    --command "uv run python cleanrl/ppo.py --env-id CartPole-v1 --total-timesteps 100000 --track --capture_video" \
+    --build --push
+```
+
+### Multi-arch images
+
+Build for both ARM and x86 to access cheaper ARM instances such as `m6gd.medium`:
+
+```bash
+uv run python -m cleanrl_utils.submit_exp \
+    --docker-tag vwxyzjn/cleanrl:latest \
+    --command "uv run python cleanrl/ppo.py --env-id CartPole-v1 --total-timesteps 100000 --track --capture_video" \
+    --archs linux/arm64,linux/amd64 \
+    --build --push
+```
+
+<Note>
+Multi-arch builds are slow on a single machine. ARM instances do not have Nvidia GPU support in any current cloud provider, so multi-arch is only useful for CPU workloads. You can speed builds up by attaching a native ARM host to your `buildx` instance:
+
+```bash
+docker buildx create --name remote --use
+docker buildx create --name remote --append ssh://user@arm-host
+docker buildx inspect --bootstrap
+```
+</Note>
+
+## W&B integration
+
+`submit_exp` reads your W&B API key from `~/.netrc` (populated by `wandb login`) and injects it as the `WANDB_API_KEY` environment variable into every container. It also sets:
+
+- `WANDB_RESUME=allow` — allows a restarted spot job to resume its run
+- `WANDB_RUN_ID` — a unique ID generated per job so resumed runs appear as one W&B run
+
+Add `--track` to your `--command` string to enable W&B logging inside the algorithm:
+
+```bash
+--command "uv run python cleanrl/ppo.py --env-id CartPole-v1 --track --capture_video"
+```
+
+## Terminating running jobs
+
+To cancel all running or queued jobs on a specific queue, use the AWS CLI directly:
+
+```bash
+# Terminate running jobs
+for i in $(aws batch list-jobs --job-queue cleanrl_gpu \
+    --job-status running --output text \
+    --query jobSummaryList[*].[jobId])
+do
+  aws batch terminate-job --job-id $i --reason "Terminating job."
+done
+
+# Terminate queued (runnable) jobs
+for i in $(aws batch list-jobs --job-queue cleanrl_gpu \
+    --job-status runnable --output text \
+    --query jobSummaryList[*].[jobId])
+do
+  aws batch terminate-job --job-id $i --reason "Terminating job."
+done
+```
+
+## Tearing down infrastructure
+
+When you no longer need the AWS Batch resources, destroy them with Terraform:
+
+```bash
+export AWS_DEFAULT_REGION=$(aws configure get region --profile default)
+terraform destroy
+```
+
+<Warning>
+`terraform destroy` removes all compute environments and job queues. Any jobs still running will be terminated. Make sure all experiments have completed or their results are saved to W&B before destroying.
+</Warning>

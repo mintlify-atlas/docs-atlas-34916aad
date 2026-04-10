@@ -1,0 +1,201 @@
+---
+title: "Run your first CleanRL training experiment quickly"
+description: "Train PPO on CartPole-v1, explore CLI flags, visualize metrics with Tensorboard, and run other algorithms like DQN on Atari and MuJoCo."
+---
+
+CleanRL algorithms are plain Python scripts you run directly from the command line. There is no framework to initialise and no configuration file to learn — every hyperparameter is a CLI flag. This page shows you how to launch your first training run, inspect the output, and move on to other environments and algorithms.
+
+## Run PPO on CartPole-v1
+
+After [installing CleanRL](/get-started/installation), you can start a training run immediately. CleanRL provides two workflows depending on how you manage your virtual environment.
+
+<Tabs>
+  <Tab title="uv run">
+    `uv run` launches the script inside the project's managed environment without manually activating it first.
+
+    ```bash
+    uv run python cleanrl/ppo.py \
+        --seed 1 \
+        --env-id CartPole-v1 \
+        --total-timesteps 500000
+    ```
+  </Tab>
+  <Tab title="uv venv">
+    Activate the virtual environment first, then run the script as normal Python. Each step must be run separately.
+
+    ```bash
+    uv venv
+    ```
+
+    ```bash
+    python cleanrl/ppo.py \
+        --seed 1 \
+        --env-id CartPole-v1 \
+        --total-timesteps 500000
+    ```
+
+    <Tip>
+      We recommend the `uv venv` workflow for development. Once activated, your shell prompt shows a prefix like `(cleanrl-iXg02GqF-py3.9)`, and you can run `tensorboard` and other tools in the same shell.
+    </Tip>
+  </Tab>
+</Tabs>
+
+## Key CLI flags
+
+Every CleanRL script exposes its full configuration as CLI flags. The flags below are common across most algorithm scripts.
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--env-id` | `CartPole-v1` | The Gymnasium environment ID |
+| `--seed` | `1` | Random seed for reproducibility |
+| `--total-timesteps` | `500000` | Total environment steps to run |
+| `--learning-rate` | `2.5e-4` | Optimizer learning rate |
+| `--num-envs` | `4` | Number of parallel environments |
+| `--capture_video` | `False` | Save gameplay videos to `videos/` |
+| `--track` | `False` | Enable Weights & Biases tracking |
+| `--cuda` | `True` | Use GPU if available |
+
+## Get help for any script
+
+Pass `--help` to any CleanRL script to print its full flag reference directly in the terminal.
+
+```bash
+python cleanrl/ppo.py --help
+```
+
+```
+usage: ppo.py [-h] [--exp-name EXP_NAME] [--env-id ENV_ID]
+              [--learning-rate LEARNING_RATE] [--seed SEED]
+              [--total-timesteps TOTAL_TIMESTEPS]
+              [--torch-deterministic [TORCH_DETERMINISTIC]] [--cuda [CUDA]]
+              [--track [TRACK]] [--wandb-project-name WANDB_PROJECT_NAME]
+              [--wandb-entity WANDB_ENTITY] [--capture_video [CAPTURE_VIDEO]]
+              [--num-envs NUM_ENVS] [--num-steps NUM_STEPS]
+              [--anneal-lr [ANNEAL_LR]] [--gae [GAE]] [--gamma GAMMA]
+              [--gae-lambda GAE_LAMBDA] [--num-minibatches NUM_MINIBATCHES]
+              [--update-epochs UPDATE_EPOCHS] [--norm-adv [NORM_ADV]]
+              [--clip-coef CLIP_COEF] [--clip-vloss [CLIP_VLOSS]]
+              [--ent-coef ENT_COEF] [--vf-coef VF_COEF]
+              [--max-grad-norm MAX_GRAD_NORM] [--target-kl TARGET_KL]
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --exp-name EXP_NAME   the name of this experiment
+  --env-id ENV_ID       the id of the environment
+  --learning-rate LEARNING_RATE
+                        the learning rate of the optimizer
+  --seed SEED           seed of the experiment
+  --total-timesteps TOTAL_TIMESTEPS
+                        total timesteps of the experiments
+  --torch-deterministic [TORCH_DETERMINISTIC]
+                        if toggled, `torch.backends.cudnn.deterministic=False`
+  --cuda [CUDA]         if toggled, cuda will be enabled by default
+  --track [TRACK]       if toggled, this experiment will be tracked with Weights
+                        and Biases
+  --wandb-project-name WANDB_PROJECT_NAME
+                        the wandb's project name
+  --wandb-entity WANDB_ENTITY
+                        the entity (team) of wandb's project
+  --capture_video [CAPTURE_VIDEO]
+                        weather to capture videos of the agent performances (check
+                        out `videos` folder)
+  --num-envs NUM_ENVS   the number of parallel game environments
+  --num-steps NUM_STEPS
+                        the number of steps to run in each environment per policy
+                        rollout
+  --anneal-lr [ANNEAL_LR]
+                        Toggle learning rate annealing for policy and value
+                        networks
+  --gae [GAE]           Use GAE for advantage computation
+  --gamma GAMMA         the discount factor gamma
+  --gae-lambda GAE_LAMBDA
+                        the lambda for the general advantage estimation
+  --num-minibatches NUM_MINIBATCHES
+                        the number of mini-batches
+  --update-epochs UPDATE_EPOCHS
+                        the K epochs to update the policy
+  --norm-adv [NORM_ADV]
+                        Toggles advantages normalization
+  --clip-coef CLIP_COEF
+                        the surrogate clipping coefficient
+  --clip-vloss [CLIP_VLOSS]
+                        Toggles whether or not to use a clipped loss for the value
+                        function, as per the paper.
+  --ent-coef ENT_COEF   coefficient of the entropy
+  --vf-coef VF_COEF     coefficient of the value function
+  --max-grad-norm MAX_GRAD_NORM
+                        the maximum norm for the gradient clipping
+  --target-kl TARGET_KL
+                        the target KL divergence threshold
+```
+
+## Visualize training metrics with Tensorboard
+
+CleanRL writes all training metrics to the `runs/` directory using Tensorboard's summary format by default — no extra configuration required. Open a second terminal and run:
+
+```bash
+tensorboard --logdir runs
+```
+
+Then open `http://localhost:6006` in your browser to see episodic return, learning rate, loss curves, and more updating in real time.
+
+<Note>
+  If you are using the `uv venv` workflow, run `tensorboard` inside the activated shell so the command resolves to the correct environment.
+</Note>
+
+## Capture gameplay videos
+
+Add `--capture_video` to any run to save MP4 recordings of the agent's gameplay to `videos/{run_name}/`.
+
+```bash
+python cleanrl/ppo.py \
+    --seed 1 \
+    --env-id CartPole-v1 \
+    --total-timesteps 500000 \
+    --capture_video
+```
+
+## Run other algorithms and environments
+
+CleanRL ships algorithm variants as separate single-file scripts. Activate your environment (`uv venv`) and run any of the following:
+
+<CodeGroup>
+
+```bash Classic control
+# DQN on CartPole
+python cleanrl/dqn.py --env-id CartPole-v1
+
+# PPO on CartPole
+python cleanrl/ppo.py --env-id CartPole-v1
+
+# C51 on CartPole
+python cleanrl/c51.py --env-id CartPole-v1
+```
+
+```bash Atari (requires .[atari])
+uv pip install ".[atari]"
+
+python cleanrl/dqn_atari.py --env-id BreakoutNoFrameskip-v4
+python cleanrl/ppo_atari.py --env-id BreakoutNoFrameskip-v4
+python cleanrl/sac_atari.py --env-id BreakoutNoFrameskip-v4
+```
+
+```bash EnvPool Atari (Linux only, requires .[envpool])
+uv pip install ".[envpool]"
+
+# 3-4x speed-up with side-effects-free vectorisation
+python cleanrl/ppo_atari_envpool.py --env-id BreakoutNoFrameskip-v4
+```
+
+```bash Procgen (requires .[procgen])
+uv pip install ".[procgen]"
+
+python cleanrl/ppo_procgen.py --env-id starpilot
+python cleanrl/ppg_procgen.py --env-id starpilot
+```
+
+</CodeGroup>
+
+<Tip>
+  Each script is fully self-contained. You can read `cleanrl/ppo.py` from top to bottom to understand every implementation detail of PPO — no need to trace through a modular library.
+</Tip>

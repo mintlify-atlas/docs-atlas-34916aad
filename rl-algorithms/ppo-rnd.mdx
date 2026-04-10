@@ -1,0 +1,113 @@
+---
+title: "PPO with Random Network Distillation (PPO-RND)"
+description: "Intrinsic curiosity via Random Network Distillation on top of PPO for hard-exploration Atari games. Uses EnvPool for fast vectorized training."
+---
+
+Random Network Distillation (RND) is an exploration bonus that can be layered on top of any RL algorithm. A randomly initialized target network and a trained predictor network are maintained. The predictor's error on new observations serves as an intrinsic curiosity reward: high error means the observation is novel, so the agent is rewarded for exploring it. As the predictor learns to match the target, intrinsic rewards decay for visited states.
+
+This implementation pairs RND with [PPO](/rl-algorithms/ppo) (following the original paper) and uses [EnvPool](https://github.com/sail-sg/envpool) for highly efficient vectorized Atari environments. It demonstrates strong results on hard-exploration games such as Montezuma's Revenge.
+
+**Original paper:**
+
+- [Exploration by Random Network Distillation](https://arxiv.org/abs/1810.12894) — Burda et al., 2019
+
+## Variants
+
+<CardGroup cols={1}>
+  <Card title="ppo_rnd_envpool.py" icon="github" href="https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppo_rnd_envpool.py">
+    For Atari games. Uses EnvPool for vectorized environments and convolutional networks with standard Atari preprocessing.
+  </Card>
+</CardGroup>
+
+## `ppo_rnd_envpool.py`
+
+This implementation uses EnvPool's blazing-fast Atari vectorized environment with standard convolutional preprocessing. It works with Atari's pixel `Box` observation space (210×160×3) and `Discrete` action spaces.
+
+<Warning>
+  `ppo_rnd_envpool.py` only works on Linux. EnvPool does not provide wheels for Windows or macOS. See [envpool's available wheels](https://pypi.org/project/envpool/#files).
+</Warning>
+
+<Warning>
+  EnvPool (≤0.6.4) has a known behavior difference from gym's vectorized environments: on episode termination, `env.step()` returns the terminated state `s_last` rather than the initial state of the new episode `s_new`. This causes the observation to be off by one step. It does not appear to affect performance in practice. See [sail-sg/envpool#194](https://github.com/sail-sg/envpool/issues/194) for updates.
+</Warning>
+
+### Installation and usage
+
+<Tabs>
+  <Tab title="uv">
+    ```bash
+    uv pip install ".[envpool]"
+    uv run python cleanrl/ppo_rnd_envpool.py --help
+    uv run python cleanrl/ppo_rnd_envpool.py --env-id MontezumaRevenge-v5
+    uv run python cleanrl/ppo_rnd_envpool.py --env-id Pitfall-v5
+    ```
+  </Tab>
+  <Tab title="pip">
+    ```bash
+    pip install -r requirements/requirements-envpool.txt
+    python cleanrl/ppo_rnd_envpool.py --help
+    python cleanrl/ppo_rnd_envpool.py --env-id MontezumaRevenge-v5
+    ```
+  </Tab>
+</Tabs>
+
+### Hyperparameters
+
+<AccordionGroup>
+  <Accordion title="PPO base hyperparameters">
+    | Parameter | Default | Description |
+    |-----------|---------|-------------|
+    | `--env-id` | `MontezumaRevenge-v5` | Atari environment ID (EnvPool format) |
+    | `--total-timesteps` | `2000000000` | Total training timesteps (2B for hard-exploration games) |
+    | `--learning-rate` | `1e-4` | Optimizer learning rate |
+    | `--num-envs` | `128` | Number of parallel environments |
+    | `--num-steps` | `128` | Steps per rollout per environment |
+    | `--anneal-lr` | `True` | Linearly anneal learning rate to zero |
+    | `--gamma` | `0.999` | Extrinsic reward discount factor γ |
+    | `--gae-lambda` | `0.95` | GAE λ for advantage estimation |
+    | `--num-minibatches` | `4` | Number of minibatches per update |
+    | `--update-epochs` | `4` | PPO update epochs per rollout |
+    | `--norm-adv` | `True` | Normalize advantages |
+    | `--clip-coef` | `0.1` | PPO clipping coefficient |
+    | `--clip-vloss` | `True` | Use clipped value loss |
+    | `--ent-coef` | `0.001` | Entropy coefficient |
+    | `--vf-coef` | `0.5` | Value function loss coefficient |
+    | `--max-grad-norm` | `0.5` | Gradient clipping norm |
+  </Accordion>
+  <Accordion title="RND-specific hyperparameters">
+    | Parameter | Default | Description |
+    |-----------|---------|-------------|
+    | `--update-proportion` | `0.25` | Fraction of experience used to update the predictor network |
+    | `--int-coef` | `1.0` | Intrinsic reward coefficient |
+    | `--ext-coef` | `2.0` | Extrinsic reward coefficient |
+    | `--int-gamma` | `0.99` | Discount factor for intrinsic rewards |
+    | `--num-iterations-obs-norm-init` | `50` | Rollouts of a random agent used to initialize observation normalization |
+  </Accordion>
+</AccordionGroup>
+
+### Key implementation details
+
+1. **Observation normalization initialization** — Before training begins, a random agent steps through the environment for `num_steps * num_iterations_obs_norm_init` steps to warm up the running mean and variance used to normalize observations for the RND networks. This follows the [original implementation](https://github.com/openai/random-network-distillation/blob/f75c0f1efa473d5109d487062fd8ed49ddce6634/run_atari.py#L69).
+
+2. **Sticky actions** — EnvPool is configured with a repeat-action probability to replicate the sticky action setting used in the original paper. This makes the exploration problem harder and more realistic.
+
+3. **Separate discount rates** — The intrinsic and extrinsic rewards use different discount factors (`int_gamma=0.99` vs. `gamma=0.999`), since intrinsic rewards do not need to be propagated as far into the future.
+
+4. **Custom episode statistics** — A custom `RecordEpisodeStatistics` wrapper is used to track both extrinsic and intrinsic episodic returns correctly under EnvPool's episode handling behavior.
+
+### Logged metrics
+
+In addition to the standard PPO metrics, `ppo_rnd_envpool.py` logs:
+
+- `charts/episode_curiosity_reward` — Intrinsic (curiosity) reward accumulated per episode.
+- `losses/fwd_loss` — Mean squared error between the predictor and target networks. This is also a proxy for the intrinsic reward magnitude in the current batch.
+
+### Experiment results
+
+| Environment | `ppo_rnd_envpool.py` | Burda et al. (2019), Figure 7 (2000M steps) |
+|-------------|---------------------|----------------------------------------------|
+| MontezumaRevenge-v5 | 7100 (1 seed) | 8152 (3 seeds) |
+
+<Note>
+  The CleanRL benchmark uses 1 seed due to limited compute — each run takes approximately 250 hours. `MontezumaRevenge-v5` in EnvPool is equivalent to `MontezumaRevengeNoFrameSkip-v4` in gym.
+</Note>

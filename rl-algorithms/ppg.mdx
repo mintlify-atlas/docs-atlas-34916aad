@@ -1,0 +1,121 @@
+---
+title: "Phasic Policy Gradient (PPG) for ProcGen Environments"
+description: "Improves PPO sample efficiency on ProcGen by separating policy and value training into distinct phases with an auxiliary distillation objective."
+---
+
+Phasic Policy Gradient (PPG) improves on PPO by separating policy optimization and value function training into two distinct phases. During the **policy phase**, PPO updates run as normal and all experience is saved to a replay buffer. During the **auxiliary phase**, the replay buffer is used to further train the value function and distill knowledge from the current policy into an auxiliary head, controlled by a behavioral cloning coefficient.
+
+This separation prevents conflicting gradients from the policy and value objectives and improves sample efficiency on the ProcGen benchmark, at the cost of slower wall-clock time compared to standard PPO.
+
+**Original paper:**
+
+- [Phasic Policy Gradient](https://arxiv.org/abs/2009.04416) — Cobbe et al., 2021
+
+**Reference implementation:**
+
+- [openai/phasic-policy-gradient](https://github.com/openai/phasic-policy-gradient)
+
+## Variants
+
+<CardGroup cols={1}>
+  <Card title="ppg_procgen.py" icon="github" href="https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppg_procgen.py">
+    For ProcGen benchmark environments. Uses 64×64 RGB observations, discrete actions, and an IMPALA-style CNN backbone.
+  </Card>
+</CardGroup>
+
+## `ppg_procgen.py`
+
+This implementation targets the ProcGen benchmark, which uses procedurally generated 64×64 RGB image observations and discrete action spaces.
+
+### Installation and usage
+
+<Tabs>
+  <Tab title="uv">
+    ```bash
+    uv pip install ".[procgen]"
+    uv run python cleanrl/ppg_procgen.py --help
+    uv run python cleanrl/ppg_procgen.py --env-id starpilot
+    uv run python cleanrl/ppg_procgen.py --env-id bossfight
+    uv run python cleanrl/ppg_procgen.py --env-id bigfish
+    ```
+  </Tab>
+  <Tab title="pip">
+    ```bash
+    pip install -r requirements/requirements-procgen.txt
+    python cleanrl/ppg_procgen.py --help
+    python cleanrl/ppg_procgen.py --env-id starpilot
+    python cleanrl/ppg_procgen.py --env-id bossfight
+    ```
+  </Tab>
+</Tabs>
+
+### Hyperparameters
+
+<AccordionGroup>
+  <Accordion title="Policy phase hyperparameters (same as PPO)">
+    | Parameter | Default | Description |
+    |-----------|---------|-------------|
+    | `--env-id` | `starpilot` | ProcGen environment ID |
+    | `--total-timesteps` | `25000000` | Total training timesteps |
+    | `--learning-rate` | `5e-4` | Optimizer learning rate |
+    | `--num-envs` | `64` | Number of parallel environments |
+    | `--num-steps` | `256` | Steps per rollout per environment |
+    | `--anneal-lr` | `False` | Learning rate annealing (disabled by default) |
+    | `--gamma` | `0.999` | Discount factor γ |
+    | `--gae-lambda` | `0.95` | GAE λ for advantage estimation |
+    | `--num-minibatches` | `8` | Number of minibatches per policy update |
+    | `--adv-norm-fullbatch` | `True` | Normalize advantages over the full batch (not per minibatch) |
+    | `--clip-coef` | `0.2` | PPO clipping coefficient |
+    | `--clip-vloss` | `True` | Use clipped value loss |
+    | `--ent-coef` | `0.01` | Entropy coefficient |
+    | `--vf-coef` | `0.5` | Value function loss coefficient |
+    | `--max-grad-norm` | `0.5` | Gradient clipping norm |
+  </Accordion>
+  <Accordion title="Auxiliary phase hyperparameters (PPG-specific)">
+    | Parameter | Default | Description |
+    |-----------|---------|-------------|
+    | `--n-iteration` | `32` | N_π: number of policy phase iterations before each auxiliary phase |
+    | `--e-policy` | `1` | E_π: policy update epochs per policy phase |
+    | `--v-value` | `1` | E_V: value update epochs per policy phase |
+    | `--e-auxiliary` | `6` | E_aux: auxiliary phase training epochs |
+    | `--beta-clone` | `1.0` | Behavioral cloning coefficient for policy distillation |
+    | `--num-aux-rollouts` | `4` | Number of minibatches in the auxiliary phase |
+    | `--n-aux-grad-accum` | `1` | Gradient accumulation steps in auxiliary phase |
+  </Accordion>
+</AccordionGroup>
+
+### Key implementation details
+
+`ppg_procgen.py` includes several implementation details from the original code that are not described in the paper:
+
+1. **Full rollout sampling in the auxiliary phase** — Instead of randomly sampling individual observations, the auxiliary phase samples full rollouts of 256 steps from the replay buffer. This gives a meaningful performance boost.
+
+2. **Batch-level advantage normalization** — Advantages are normalized over the entire batch before PPO updates, rather than per minibatch.
+
+3. **Normalized network initialization** — All layers use a specific normalized initialization scheme:
+   - Weights are initialized with Kaiming Uniform, then divided by their L2 norm.
+   - Scale factors differ by layer: value/policy/auxiliary heads use `0.1`, the fully connected layer after the last conv uses `1.4`, and conv layers use approximately `0.638`.
+
+4. **Adam ε parameter** — Set to `1e-8` (PyTorch default) rather than `1e-5` used in PPO.
+
+5. **Consistent γ in reward normalization** — `gamma=0.999` is used in the `NormalizeReward` wrapper to match the PPO gamma, avoiding a mismatch present in earlier implementations.
+
+<Note>
+  The original PPG paper reports results on the `hard` distribution. CleanRL benchmarks run the `easy` distribution to reduce compute cost. The original code (`openai/phasic-policy-gradient`) is also run on `easy` mode for comparison.
+</Note>
+
+### Differences from the original implementation
+
+- CleanRL does not support LSTM (the original does).
+- CleanRL uses a single optimizer for policy and auxiliary phases (the original uses separate optimizers; the difference is small in practice).
+- CleanRL does not support multi-GPU training.
+
+### Experiment results
+
+| Environment | `ppg_procgen.py` | `ppo_procgen.py` | openai/phasic-policy-gradient (easy) |
+|-------------|------------------|------------------|---------------------------------------|
+| Starpilot (easy) | 34.82 ± 13.77 | 32.47 ± 11.21 | 42.01 ± 9.59 |
+| Bossfight (easy) | 10.78 ± 1.90 | 9.63 ± 2.35 | 10.71 ± 2.05 |
+| Bigfish (easy) | 24.23 ± 10.73 | 16.80 ± 9.49 | 15.94 ± 10.80 |
+
+Results are averaged over 25M timesteps.

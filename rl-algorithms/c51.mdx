@@ -1,0 +1,232 @@
+---
+title: "Categorical DQN (C51) — CleanRL variants"
+description: "Single-file C51 implementations for classic control and Atari in PyTorch and JAX, learning full return distributions via categorical projection."
+---
+
+C51 introduces a distributional perspective to reinforcement learning. Rather than estimating a single expected return for each action, C51 learns a **probability distribution** over possible returns discretized into 51 atoms spanning a fixed support `[V_min, V_max]`. At each training step, the Bellman update shifts and projects this distribution onto the support atoms, and the loss is the cross-entropy between the current and projected distributions.
+
+This distributional approach provides richer training signal and empirically outperforms standard DQN on Atari benchmarks.
+
+**Original paper:** [A Distributional Perspective on Reinforcement Learning](https://arxiv.org/abs/1707.06887) (Bellemare, Dabney, and Munos, 2017)
+
+## Variants
+
+<CardGroup cols={2}>
+  <Card title="c51.py" icon="gamepad-2" href="#c51py">
+    Classic control tasks. MLP network, discrete actions.
+  </Card>
+  <Card title="c51_atari.py" icon="tv" href="#c51_ataripy">
+    Atari games. Nature CNN, frame stacking, Atari preprocessing.
+  </Card>
+  <Card title="c51_jax.py" icon="bolt" href="#c51_jaxpy">
+    Classic control in JAX. ~55% faster than `c51.py`.
+  </Card>
+  <Card title="c51_atari_jax.py" icon="microchip" href="#c51_atari_jaxpy">
+    Atari in JAX. ~25% faster than `c51_atari.py`.
+  </Card>
+</CardGroup>
+
+## `c51.py`
+
+[`c51.py`](https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/c51.py) applies the distributional C51 update to classic control environments using a simple MLP network.
+
+**Supports:**
+- `Box` observation space (low-level features)
+- `Discrete` action space
+- Environments like `CartPole-v1`, `Acrobot-v1`, `MountainCar-v0`
+- `--save-model` and `--upload-model` for HuggingFace Hub
+
+### Installation and usage
+
+<CodeGroup>
+
+```bash uv
+uv pip install .
+uv run python cleanrl/c51.py --env-id CartPole-v1
+```
+
+```bash pip
+pip install .
+python cleanrl/c51.py --env-id CartPole-v1
+```
+
+</CodeGroup>
+
+### Key hyperparameters
+
+<AccordionGroup>
+  <Accordion title="Algorithm hyperparameters">
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--env-id` | `CartPole-v1` | Gymnasium environment ID |
+| `--total-timesteps` | `500000` | Total environment steps |
+| `--learning-rate` | `2.5e-4` | Adam optimizer learning rate |
+| `--num-envs` | `1` | Number of parallel environments |
+| `--n-atoms` | `101` | Number of atoms in the return distribution |
+| `--v-min` | `-100` | Lower bound of the return support |
+| `--v-max` | `100` | Upper bound of the return support |
+| `--buffer-size` | `10000` | Replay memory capacity |
+| `--gamma` | `0.99` | Discount factor |
+| `--target-network-frequency` | `500` | Steps between target network updates |
+| `--batch-size` | `128` | Mini-batch size for training |
+| `--start-e` | `1.0` | Starting epsilon for ε-greedy exploration |
+| `--end-e` | `0.05` | Final epsilon after annealing |
+| `--exploration-fraction` | `0.5` | Fraction of training spent annealing epsilon |
+| `--learning-starts` | `10000` | Steps before training begins |
+| `--train-frequency` | `10` | Steps between each training update |
+
+  </Accordion>
+  <Accordion title="Model saving and HuggingFace Hub">
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--save-model` | `False` | Save model checkpoint to `runs/{run_name}/` |
+| `--upload-model` | `False` | Upload saved model to HuggingFace Hub |
+| `--hf-entity` | `""` | HuggingFace user or organization name |
+
+  </Accordion>
+</AccordionGroup>
+
+### Benchmark results
+
+| Environment | `c51.py` |
+|-------------|----------|
+| CartPole-v1 | 481.20 ± 20.53 |
+| Acrobot-v1 | -87.70 ± 5.52 |
+| MountainCar-v0 | -166.38 ± 27.94 |
+
+---
+
+## `c51_atari.py`
+
+[`c51_atari.py`](https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/c51_atari.py) applies C51 to Atari using the Nature CNN, standard Atari preprocessing wrappers, and frame stacking. The distributional update significantly improves scores over standard DQN.
+
+**Supports:**
+- Atari pixel observations `(210, 160, 3)`
+- `Discrete` action space
+- `--save-model` and `--upload-model` for HuggingFace Hub
+
+<Note>
+  `c51_atari.py` uses a self-contained evaluation scheme: episodic returns are reported during training with the current exploration epsilon rather than a separate evaluation run.
+</Note>
+
+### Installation and usage
+
+<CodeGroup>
+
+```bash uv
+uv pip install ".[atari]"
+uv run python cleanrl/c51_atari.py --env-id BreakoutNoFrameskip-v4
+uv run python cleanrl/c51_atari.py --env-id PongNoFrameskip-v4
+```
+
+```bash pip
+pip install -r requirements/requirements-atari.txt
+python cleanrl/c51_atari.py --env-id BreakoutNoFrameskip-v4
+python cleanrl/c51_atari.py --env-id PongNoFrameskip-v4
+```
+
+</CodeGroup>
+
+### Benchmark results
+
+| Environment | `c51_atari.py` (10M) | Bellemare et al. (50M) |
+|-------------|----------------------|------------------------|
+| BreakoutNoFrameskip-v4 | 461.86 ± 69.65 | 748 |
+| PongNoFrameskip-v4 | 19.46 ± 0.70 | 20.9 |
+| BeamRiderNoFrameskip-v4 | 9592.90 ± 2270.15 | 14,074 |
+
+---
+
+## `c51_atari_jax.py`
+
+[`c51_atari_jax.py`](https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/c51_atari_jax.py) reimplements `c51_atari.py` using JAX, Flax, and Optax, achieving approximately 25% faster wall-clock training time.
+
+**Supports:**
+- Atari pixel observations
+- `Discrete` action space
+- JAX/Flax/Optax training loop
+
+### Installation and usage
+
+<CodeGroup>
+
+```bash uv
+uv pip install ".[atari,jax]"
+uv pip install --upgrade "jax[cuda11_cudnn82]==0.4.8" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+uv run python cleanrl/c51_atari_jax.py --env-id BreakoutNoFrameskip-v4
+uv run python cleanrl/c51_atari_jax.py --env-id PongNoFrameskip-v4
+```
+
+```bash pip
+pip install -r requirements/requirements-atari.txt
+pip install -r requirements/requirements-jax.txt
+pip install --upgrade "jax[cuda]==0.3.17" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+python cleanrl/c51_atari_jax.py --env-id BreakoutNoFrameskip-v4
+python cleanrl/c51_atari_jax.py --env-id PongNoFrameskip-v4
+```
+
+</CodeGroup>
+
+<Warning>
+  JAX does not support Windows. Use Windows Subsystem for Linux (WSL) if needed.
+</Warning>
+
+### Benchmark results
+
+| Environment | `c51_atari_jax.py` (10M) | `c51_atari.py` (10M) | Bellemare et al. (50M) |
+|-------------|--------------------------|----------------------|------------------------|
+| BreakoutNoFrameskip-v4 | 448.56 ± 17.02 | 461.86 ± 69.65 | 748 |
+| PongNoFrameskip-v4 | 19.88 ± 0.31 | 19.46 ± 0.70 | 20.9 |
+| BeamRiderNoFrameskip-v4 | 9504.91 ± 709.69 | 9592.90 ± 2270.15 | 14,074 |
+
+---
+
+## `c51_jax.py`
+
+[`c51_jax.py`](https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/c51_jax.py) reimplements `c51.py` using JAX for classic control tasks, achieving approximately 55% faster wall-clock time.
+
+**Supports:**
+- `Box` observation space (low-level features)
+- `Discrete` action space
+- Environments like `CartPole-v1`
+
+### Installation and usage
+
+<CodeGroup>
+
+```bash uv
+uv pip install ".[jax]"
+uv pip install --upgrade "jax[cuda11_cudnn82]==0.4.8" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+uv run python cleanrl/c51_jax.py --env-id CartPole-v1
+```
+
+```bash pip
+pip install -r requirements/requirements-jax.txt
+pip install --upgrade "jax[cuda]==0.3.17" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+python cleanrl/c51_jax.py --env-id CartPole-v1
+```
+
+</CodeGroup>
+
+<Warning>
+  JAX does not support Windows. Use Windows Subsystem for Linux (WSL) if needed.
+</Warning>
+
+### Benchmark results
+
+| Environment | `c51_jax.py` | `c51.py` |
+|-------------|--------------|----------|
+| CartPole-v1 | 491.07 ± 9.70 | 481.20 ± 20.53 |
+| Acrobot-v1 | -86.74 ± 2.19 | -87.70 ± 5.52 |
+| MountainCar-v0 | -174.30 ± 36.35 | -166.38 ± 27.94 |
+
+## Logged metrics
+
+| Metric | Description |
+|--------|-------------|
+| `charts/episodic_return` | Episodic return of the agent |
+| `charts/SPS` | Environment steps per second |
+| `losses/loss` | Cross-entropy between current and projected return distributions |
+| `losses/q_values` | Expected return under the current distribution (`sum(pmf * atoms)`) |

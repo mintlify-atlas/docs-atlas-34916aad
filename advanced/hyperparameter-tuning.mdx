@@ -1,0 +1,240 @@
+---
+title: "Hyperparameter tuning across multiple environments"
+description: "Use CleanRL's Tuner class with Optuna to find a single set of hyperparameters that performs well across multiple environments with different reward scales."
+---
+
+CleanRL includes a lightweight hyperparameter tuning utility built around [Optuna](https://optuna.org/). Its primary purpose is to help you find **a single set of hyperparameters that works well across multiple tasks of the same type** — for example, one configuration for all MuJoCo environments, rather than tuning per task. This avoids the overfitting and poor generalization that comes from per-environment tuning.
+
+## Installation
+
+Install CleanRL with the optional Optuna dependencies:
+
+```bash
+uv pip install ".[optuna]"
+```
+
+## Basic usage
+
+The entry point is the `Tuner` class from `cleanrl_utils.tuner`. The `tuner_example.py` in the repository root demonstrates a complete setup:
+
+```python tuner_example.py
+import optuna
+
+from cleanrl_utils.tuner import Tuner
+
+tuner = Tuner(
+    script="cleanrl/ppo.py",
+    metric="charts/episodic_return",
+    metric_last_n_average_window=50,
+    direction="maximize",
+    aggregation_type="average",
+    target_scores={
+        "CartPole-v1": [0, 500],
+        "Acrobot-v1": [-500, 0],
+    },
+    params_fn=lambda trial: {
+        "learning-rate": trial.suggest_float("learning-rate", 0.0003, 0.003, log=True),
+        "num-minibatches": trial.suggest_categorical("num-minibatches", [1, 2, 4]),
+        "update-epochs": trial.suggest_categorical("update-epochs", [1, 2, 4, 8]),
+        "num-steps": trial.suggest_categorical("num-steps", [5, 16, 32, 64, 128]),
+        "vf-coef": trial.suggest_float("vf-coef", 0, 5),
+        "max-grad-norm": trial.suggest_float("max-grad-norm", 0, 5),
+        "total-timesteps": 100000,
+        "num-envs": 16,
+    },
+    pruner=optuna.pruners.MedianPruner(n_startup_trials=5),
+    sampler=optuna.samplers.TPESampler(),
+)
+tuner.tune(
+    num_trials=100,
+    num_seeds=3,
+)
+```
+
+Run it with:
+
+```bash
+python tuner_example.py
+```
+
+## How a tuning run works
+
+Each call to `tuner.tune()` executes the following loop:
+
+<Steps>
+  <Step title="Sample hyperparameters">
+    The tuner calls `params_fn(trial)` to obtain a dictionary of hyperparameter values for this trial. Optuna's `trial` object provides `suggest_float`, `suggest_categorical`, and other sampling methods.
+  </Step>
+  <Step title="Run experiments across seeds and environments">
+    For each trial, the tuner runs `num_seeds` experiments for every environment listed in `target_scores`. With `num_seeds=3` and two environments, this means `2 × 3 = 6` subprocess invocations of the script per trial.
+  </Step>
+  <Step title="Compute per-experiment normalized scores">
+    Within each experiment, the tuner reads the last `metric_last_n_average_window` values of `metric` from TensorBoard and averages them to get a scalar $x_i$. If `target_scores` are provided, it normalizes this value:
+
+    $$z_i = \frac{x_i - \text{low}}{\text{high} - \text{low}}$$
+
+    For example, with `"CartPole-v1": [0, 500]`, a return of 400 gives $z = 0.8$.
+  </Step>
+  <Step title="Aggregate across environments and seeds">
+    The `aggregation_type` function (`"average"` or `"median"`) is applied across environments within each seed, then the results are averaged across seeds to produce the trial's final objective value.
+  </Step>
+  <Step title="Optimize and prune">
+    The trial reports its score to Optuna after each seed. If a pruner is configured, Optuna may stop the trial early. The study then selects the next hyperparameter configuration according to the sampler.
+  </Step>
+</Steps>
+
+## Normalizing across environments with `target_scores`
+
+Different environments have incompatible reward scales. `target_scores` accepts a dictionary mapping environment IDs to `[low, high]` bounds — ballpark estimates of the worst and best expected returns. These do not have to be exact.
+
+```python
+tuner = Tuner(
+    ...
+    target_scores={
+        "CartPole-v1": [0, 500],
+        "Acrobot-v1": [-500, 0],
+    },
+    aggregation_type="average",
+)
+```
+
+<Tip>
+For Atari environments, use the human-normalized score bounds from Mnih et al. (2015), Table 2 — the first number is the random-play baseline and the second is the human expert score. Use `aggregation_type="median"` for Atari to match standard evaluation practice.
+</Tip>
+
+```python
+tuner = Tuner(
+    script="cleanrl/ppo_atari_envpool.py",
+    metric="charts/episodic_return",
+    metric_last_n_average_window=50,
+    direction="maximize",
+    aggregation_type="median",
+    target_scores={
+        "Alien-v5": [227.8, 6875],
+        "Amidar-v5": [5.8, 1676],
+        "Assault-v5": [222.4, 1496],
+        "Asterix-v5": [210.0, 8503],
+        "Asteroids-v5": [719.1, 13157],
+        # ... add remaining games
+    },
+    num_seeds=3,
+    ...
+)
+```
+
+## `aggregation_type` options
+
+The `aggregation_type` parameter controls how normalized scores are combined across environments within a single seed:
+
+| Value | Behavior |
+|-------|----------|
+| `"average"` | Arithmetic mean across environments — good for classic control |
+| `"median"` | Median across environments — robust to outliers, standard for Atari |
+| `"max"` | Maximum normalized score across environments |
+| `"min"` | Minimum normalized score across environments |
+
+## `direction` options
+
+Set `direction` to control the optimization objective:
+
+- `"maximize"` — for metrics like episodic return (default)
+- `"minimize"` — for metrics like loss or regret
+
+## Defining the search space with `params_fn`
+
+`params_fn` is a callable that receives an Optuna `trial` object and returns a dictionary of hyperparameter values. Fixed values (not tuned) can be included alongside sampled ones:
+
+```python
+params_fn=lambda trial: {
+    # Sampled hyperparameters
+    "learning-rate": trial.suggest_float("learning-rate", 0.0003, 0.003, log=True),
+    "num-minibatches": trial.suggest_categorical("num-minibatches", [1, 2, 4]),
+    "update-epochs": trial.suggest_categorical("update-epochs", [1, 2, 4, 8]),
+    "num-steps": trial.suggest_categorical("num-steps", [5, 16, 32, 64, 128]),
+    "vf-coef": trial.suggest_float("vf-coef", 0, 5),
+    "max-grad-norm": trial.suggest_float("max-grad-norm", 0, 5),
+    # Fixed values passed as-is to the script
+    "total-timesteps": 100000,
+    "num-envs": 16,
+}
+```
+
+The keys map directly to the CLI flags of your script (without the `--` prefix).
+
+## Pruners and samplers
+
+You can pass any Optuna [pruner](https://optuna.readthedocs.io/en/stable/reference/pruners.html) or [sampler](https://optuna.readthedocs.io/en/stable/reference/samplers.html) to `Tuner`. If omitted, Optuna uses its defaults.
+
+```python
+tuner = Tuner(
+    ...
+    pruner=optuna.pruners.MedianPruner(n_startup_trials=5),
+    sampler=optuna.samplers.TPESampler(),
+)
+```
+
+The `MedianPruner` stops a trial early if its intermediate score falls below the median of completed trials at the same step. `TPESampler` uses Tree-structured Parzen Estimators to select promising regions of the search space.
+
+## Tracking tuning runs with Weights & Biases
+
+Pass `wandb_kwargs` to log every experiment to W&B. Each trial becomes a separate run grouped under the study name:
+
+```python
+tuner = Tuner(
+    ...
+    wandb_kwargs={"project": "cleanrl"},
+)
+```
+
+All per-environment returns and aggregated normalized scores are logged automatically for each trial.
+
+## Visualizing results with optuna-dashboard
+
+The tuner writes all trial results to a SQLite database at `./cleanrl_hpopt.db`. Launch the dashboard to explore results interactively:
+
+```bash
+uv run optuna-dashboard sqlite:///cleanrl_hpopt.db
+```
+
+The dashboard shows the optimization history (normalized score vs. trial number) and a parallel coordinates plot for identifying which hyperparameter regions perform best.
+
+<Note>
+To use a more persistent storage backend, pass a connection string to `Tuner`: `Tuner(..., storage="mysql://root@localhost/example")`.
+</Note>
+
+## Tuning without known reward scales
+
+If you do not know the reward scale for an environment, set its `target_scores` entry to `None`. In this case the raw metric average is used directly as the objective. This only works reliably with a single environment, since comparing raw scores across environments with different scales is not meaningful.
+
+```python
+tuner = Tuner(
+    script="cleanrl/ppo.py",
+    metric="charts/episodic_return",
+    metric_last_n_average_window=50,
+    direction="maximize",
+    aggregation_type="average",
+    target_scores={
+        "CartPole-v1": None,  # raw return used directly
+    },
+    params_fn=lambda trial: {
+        "learning-rate": trial.suggest_float("learning-rate", 0.0003, 0.003, log=True),
+        "num-minibatches": trial.suggest_categorical("num-minibatches", [1, 2, 4]),
+        "update-epochs": trial.suggest_categorical("update-epochs", [1, 2, 4, 8]),
+        "num-steps": trial.suggest_categorical("num-steps", [5, 16, 32, 64, 128]),
+        "vf-coef": trial.suggest_float("vf-coef", 0, 5),
+        "max-grad-norm": trial.suggest_float("max-grad-norm", 0, 5),
+        "total-timesteps": 100000,
+        "num-envs": 16,
+    },
+    pruner=optuna.pruners.MedianPruner(n_startup_trials=5),
+    sampler=optuna.samplers.TPESampler(),
+)
+tuner.tune(
+    num_trials=100,
+    num_seeds=3,
+)
+```
+
+<Warning>
+Setting `target_scores` to `None` for multiple environments simultaneously will raise a `ValueError`. You must provide explicit score bounds when tuning across more than one environment.
+</Warning>

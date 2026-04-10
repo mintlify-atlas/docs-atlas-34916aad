@@ -1,0 +1,129 @@
+---
+title: "Model Zoo: saving and loading trained agents"
+description: "Save trained CleanRL agents to disk and upload them to the Hugging Face Model Hub, then load and evaluate any model with cleanrl_utils.enjoy."
+---
+
+CleanRL has experimental support for the [Hugging Face Model Hub](https://huggingface.co/models). You can upload a trained agent directly from a script flag, and load any published model with a single command using `cleanrl_utils.enjoy`. The CleanRL organization on Hugging Face at [huggingface.co/cleanrl](https://huggingface.co/cleanrl) hosts pre-trained models for several algorithm variants.
+
+## Supported algorithms
+
+Hub integration is currently available for the following algorithm variants:
+
+| Algorithm | Variants |
+|-----------|----------|
+| Deep Q-Learning (DQN) | `dqn.py`, `dqn_atari.py`, `dqn_jax.py`, `dqn_atari_jax.py` |
+| Categorical DQN (C51) | `c51.py`, `c51_atari.py`, `c51_jax.py`, `c51_atari_jax.py` |
+| Deep Deterministic Policy Gradient (DDPG) | `ddpg_continuous_action.py`, `ddpg_continuous_action_jax.py` |
+| Twin Delayed DDPG (TD3) | `td3_continuous_action.py`, `td3_continuous_action_jax.py` |
+
+## Loading models from the hub
+
+Use `cleanrl_utils.enjoy` to download and evaluate a model from the hub without writing any code. Install the dependencies for the algorithm you want to run, then pass `--exp-name` and `--env-id`:
+
+<CodeGroup>
+
+```bash DQN on CartPole
+uv pip install .
+uv run python -m cleanrl_utils.enjoy --exp-name dqn --env-id CartPole-v1
+```
+
+```bash DQN (JAX) on CartPole
+uv pip install ".[jax]"
+uv run python -m cleanrl_utils.enjoy --exp-name dqn_jax --env-id CartPole-v1
+```
+
+```bash DQN on Atari
+uv pip install ".[atari]"
+uv run python -m cleanrl_utils.enjoy --exp-name dqn_atari --env-id BreakoutNoFrameskip-v4
+```
+
+```bash DQN (JAX) on Atari
+uv pip install ".[atari,jax]"
+uv run python -m cleanrl_utils.enjoy --exp-name dqn_atari_jax --env-id BreakoutNoFrameskip-v4
+```
+
+</CodeGroup>
+
+By default, `enjoy.py` resolves the model repository as `{hf-entity}/{env-id}-{exp-name}-seed{seed}`. You can override the repository directly with `--hf-repository`:
+
+```bash
+uv run python -m cleanrl_utils.enjoy \
+    --exp-name dqn \
+    --env-id CartPole-v1 \
+    --hf-repository cleanrl/CartPole-v1-dqn-seed1
+```
+
+<AccordionGroup>
+  <Accordion title="What happens under the hood?">
+    `cleanrl_utils.enjoy` downloads the model file from Hugging Face using `hf_hub_download` and passes it to the algorithm-specific evaluation function. The model file is named `{exp_name}.cleanrl_model`. For lower-level access — such as extracting activations or modifying evaluation logic — use the eval scripts directly, for example `cleanrl_utils/evals/dqn_eval.py`.
+  </Accordion>
+</AccordionGroup>
+
+## Saving and uploading models
+
+### Saving to disk
+
+Run any supported script with `--save-model` to save the trained agent to the `runs/` directory after training completes:
+
+```bash
+uv run python cleanrl/dqn_jax.py \
+    --env-id CartPole-v1 \
+    --save-model
+```
+
+The model is written as `runs/{run_name}/{exp_name}.cleanrl_model`.
+
+### Uploading to Hugging Face
+
+Add `--upload-model` to push the saved model to the Hub under your default Hugging Face entity (your username):
+
+```bash
+uv run python cleanrl/dqn_jax.py \
+    --env-id CartPole-v1 \
+    --save-model \
+    --upload-model
+```
+
+To upload to an organization instead, specify `--hf-entity`:
+
+```bash
+uv run python cleanrl/dqn_jax.py \
+    --env-id CartPole-v1 \
+    --save-model \
+    --upload-model \
+    --hf-entity cleanrl
+```
+
+<Steps>
+  <Step title="Log in to Hugging Face">
+    Authenticate with your Hugging Face account before uploading:
+    ```bash
+    huggingface-cli login
+    ```
+  </Step>
+  <Step title="Train and save the model">
+    Run the script with `--save-model`. Training proceeds normally and the model is saved to `runs/` on completion.
+    ```bash
+    uv run python cleanrl/dqn_atari_jax.py \
+        --env-id SeaquestNoFrameskip-v4 \
+        --save-model
+    ```
+  </Step>
+  <Step title="Upload to the hub">
+    Add `--upload-model` (and optionally `--hf-entity`) to push the saved model. The repository is created automatically if it does not exist.
+    ```bash
+    uv run python cleanrl/dqn_atari_jax.py \
+        --env-id SeaquestNoFrameskip-v4 \
+        --save-model \
+        --upload-model \
+        --hf-entity cleanrl
+    ```
+  </Step>
+  <Step title="Verify the upload">
+    Visit `https://huggingface.co/{your-entity}/{env-id}-{exp-name}-seed{seed}` to confirm the model file is present.
+  </Step>
+</Steps>
+
+<Note>
+Hub integration is marked experimental. Not all algorithm variants support it yet. Check the table above for the current list of supported scripts.
+</Note>

@@ -1,0 +1,112 @@
+---
+title: "Install CleanRL and configure your Python environment"
+description: "Install CleanRL with uv or pip, configure optional dependencies for Atari, MuJoCo, JAX, and more, and set up your GPU environment."
+---
+
+CleanRL is a deep reinforcement learning library where every algorithm variant lives in a single self-contained file. This page walks you through getting a working environment from scratch, including optional dependency groups for common RL benchmarks.
+
+## Prerequisites
+
+- Python `>=3.8,<3.11`
+- [uv 0.7.19+](https://docs.astral.sh/uv/) — recommended for environment and dependency management
+
+## Quick install
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/vwxyzjn/cleanrl.git && cd cleanrl
+    ```
+  </Step>
+  <Step title="Install core dependencies">
+    ```bash
+    uv pip install .
+    ```
+
+    This installs all core dependencies listed in `pyproject.toml`, including `torch`, `gymnasium`, `tensorboard`, and `wandb`.
+  </Step>
+</Steps>
+
+<Note>
+  We recommend using `uv venv` for development so you can run `tensorboard` and other tools directly inside the virtual environment. When activated, your shell prompt will show a prefix such as `(cleanrl-iXg02GqF-py3.9)`.
+</Note>
+
+## Install via pip
+
+While `uv` is recommended, traditional `requirements.txt` files are also available if you prefer a plain `pip` workflow.
+
+<CodeGroup>
+
+```bash Core dependencies
+pip install -r requirements/requirements.txt
+```
+
+```bash Optional dependencies
+pip install -r requirements/requirements-atari.txt
+pip install -r requirements/requirements-mujoco.txt
+pip install -r requirements/requirements-mujoco_py.txt
+pip install -r requirements/requirements-procgen.txt
+pip install -r requirements/requirements-envpool.txt
+pip install -r requirements/requirements-pettingzoo.txt
+pip install -r requirements/requirements-jax.txt
+pip install -r requirements/requirements-cloud.txt
+```
+
+</CodeGroup>
+
+## Optional dependencies
+
+CleanRL defines optional dependency groups in `pyproject.toml` for common RL environments and development utilities. Install only the groups you need.
+
+<Tabs>
+  <Tab title="Environments">
+    ```bash
+    uv pip install ".[atari]"       # Atari games via ALE
+    uv pip install ".[mujoco]"      # MuJoCo continuous control
+    uv pip install ".[dm_control]"  # DeepMind Control Suite
+    uv pip install ".[procgen]"     # Procgen procedural environments
+    uv pip install ".[envpool]"     # EnvPool fast vectorized envs (Linux only)
+    uv pip install ".[pettingzoo]"  # PettingZoo multi-agent environments
+    ```
+  </Tab>
+  <Tab title="Frameworks & tools">
+    ```bash
+    uv pip install ".[jax]"     # JAX/Flax/Optax for JAX-based algorithms
+    uv pip install ".[optuna]"  # Optuna hyperparameter tuning
+    uv pip install ".[cloud]"   # AWS Batch cloud integration
+    uv pip install ".[docs]"    # Documentation build tools
+    ```
+  </Tab>
+</Tabs>
+
+The table below summarises what each group provides:
+
+| Group         | Key packages                                      | Use case                        |
+| ------------- | ------------------------------------------------- | ------------------------------- |
+| `atari`       | `ale-py`, `AutoROM`, `opencv-python`, `shimmy`    | Atari 2600 games                |
+| `mujoco`      | `mujoco<=2.3.3`, `imageio`                        | MuJoCo physics simulation       |
+| `dm_control`  | `dm-control`, `shimmy`, `mujoco`, `h5py`          | DeepMind Control Suite          |
+| `procgen`     | `procgen`                                         | Procedurally generated games    |
+| `envpool`     | `envpool`, `opencv-python`                        | High-throughput vectorized envs |
+| `pettingzoo`  | `PettingZoo`, `SuperSuit`, `multi-agent-ale-py`   | Multi-agent environments        |
+| `jax`         | `jax`, `jaxlib`, `flax`, `optax`, `chex`          | JAX-based algorithm variants    |
+| `optuna`      | `optuna`, `optuna-dashboard`                      | Hyperparameter search           |
+| `cloud`       | `boto3`, `awscli`                                 | AWS Batch experiment scaling    |
+
+## CUDA version note
+
+By default, the `torch` wheel shipped on PyPI is built with CUDA 10.2. If you use a newer NVIDIA GPU (for example, an RTX 3060 Ti or any Ampere-generation card), you may see a compatibility error at runtime:
+
+```
+NVIDIA GeForce RTX 3060 Ti with CUDA capability sm_86 is not compatible with the current PyTorch installation.
+```
+
+Install the CUDA 11.3 wheel to resolve this:
+
+```bash
+uv pip install "torch==1.12.1" --upgrade --extra-index-url https://download.pytorch.org/whl/cu113
+```
+
+<Warning>
+  Run this command after the initial `uv pip install .` so it overrides only the `torch` package. All other dependencies remain unchanged.
+</Warning>

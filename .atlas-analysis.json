@@ -1,0 +1,92 @@
+{
+  "projectType": "ai-ml",
+  "projectName": "CleanRL",
+  "projectDescription": "High-quality single-file implementations of deep reinforcement learning algorithms (PPO, DQN, SAC, TD3, DDPG, C51, PPG) with research-friendly features like Tensorboard logging, W&B integration, and cloud scaling.",
+  "theme": "palm",
+  "primaryColor": "#9c9c9c",
+  "lightColor": "#3d3c3c",
+  "darkColor": "#d2d1d1",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "get-started/installation",
+              "get-started/quickstart",
+              "get-started/experiment-tracking"
+            ]
+          },
+          {
+            "group": "RL Algorithms",
+            "pages": [
+              "rl-algorithms/overview",
+              "rl-algorithms/ppo",
+              "rl-algorithms/dqn",
+              "rl-algorithms/sac",
+              "rl-algorithms/td3",
+              "rl-algorithms/ddpg",
+              "rl-algorithms/c51",
+              "rl-algorithms/ppg",
+              "rl-algorithms/ppo-rnd"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/hyperparameter-tuning",
+              "advanced/resume-training",
+              "advanced/model-zoo",
+              "advanced/benchmarking"
+            ]
+          },
+          {
+            "group": "Cloud & Scaling",
+            "pages": [
+              "cloud/overview",
+              "cloud/aws-batch"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Single-file algorithm implementations — every variant is fully self-contained in one Python file",
+    "Benchmarked across 7+ algorithms and 34+ environments with reproducible results",
+    "Tensorboard and Weights & Biases integration for experiment tracking",
+    "Hugging Face Model Hub integration for saving and loading trained models",
+    "Seeded reproducibility for deterministic experiment results",
+    "Gameplay video capture via --capture_video flag",
+    "Cloud scaling with AWS Batch and Docker support",
+    "Hyperparameter tuning via Optuna-based Tuner utility",
+    "Slurm cluster support for high-performance computing environments",
+    "JAX-accelerated variants for several algorithms (DQN, C51, DDPG, TD3, PPO)"
+  ],
+  "publicApiSurface": [
+    "cleanrl/ppo.py — PPO for classic control (CartPole, etc.)",
+    "cleanrl/ppo_atari.py — PPO for Atari games with CNN preprocessing",
+    "cleanrl/ppo_continuous_action.py — PPO for continuous action spaces (MuJoCo)",
+    "cleanrl/ppo_atari_lstm.py — PPO with LSTM for Atari",
+    "cleanrl/ppo_atari_envpool.py — PPO with EnvPool vectorized environments",
+    "cleanrl/ppo_atari_envpool_xla_jax.py — PPO with JAX and XLA acceleration",
+    "cleanrl/dqn.py — Deep Q-Learning for classic control",
+    "cleanrl/dqn_atari.py — DQN for Atari games",
+    "cleanrl/dqn_jax.py — DQN with JAX",
+    "cleanrl/c51.py — Categorical DQN (C51) for classic control",
+    "cleanrl/c51_atari.py — C51 for Atari games",
+    "cleanrl/sac_continuous_action.py — Soft Actor-Critic for continuous actions",
+    "cleanrl/sac_atari.py — SAC for Atari",
+    "cleanrl/ddpg_continuous_action.py — Deep Deterministic Policy Gradient",
+    "cleanrl/td3_continuous_action.py — Twin Delayed DDPG",
+    "cleanrl/ppg_procgen.py — Phasic Policy Gradient for ProcGen",
+    "cleanrl/ppo_rnd_envpool.py — PPO with Random Network Distillation",
+    "cleanrl/qdagger_dqn_atari_impalacnn.py — Qdagger imitation learning",
+    "cleanrl_utils.tuner.Tuner — Hyperparameter tuning utility",
+    "cleanrl_utils.benchmark — Benchmark scheduling utility",
+    "python -m cleanrl_utils.enjoy — Load and run models from HuggingFace Hub"
+  ]
+}

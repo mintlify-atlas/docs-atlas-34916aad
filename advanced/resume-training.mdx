@@ -1,0 +1,108 @@
+---
+title: "Resuming interrupted training runs"
+description: "Save periodic model checkpoints to Weights & Biases and resume training from the last checkpoint using the WANDB_RUN_ID environment variable."
+---
+
+Training runs can be interrupted unexpectedly — a node failure, a preempted job, or a resource timeout. CleanRL supports checkpoint-based resumption through Weights & Biases: the script saves the model weights at regular intervals, and you can restart from where it left off by passing the original run ID as an environment variable.
+
+## Saving model checkpoints
+
+Add a `CHECKPOINT_FREQUENCY` constant to your training loop and save the agent's state dict to the W&B run directory at that interval. The `wandb.save` call uploads the file immediately rather than waiting until the run ends.
+
+```python
+num_updates = args.total_timesteps // args.batch_size
+
+CHECKPOINT_FREQUENCY = 50
+starting_update = 1
+
+for update in range(starting_update, num_updates + 1):
+    # ... do rollouts and train models
+
+    if args.track:
+        # Tune CHECKPOINT_FREQUENCY so models are not saved too frequently
+        if update % CHECKPOINT_FREQUENCY == 0:
+            torch.save(agent.state_dict(), f"{wandb.run.dir}/agent.pt")
+            wandb.save(f"{wandb.run.dir}/agent.pt", policy="now")
+```
+
+Start training with experiment tracking enabled:
+
+```bash
+python ppo_gridnet.py --prod-mode --capture_video
+```
+
+If the run is interrupted, the most recently saved `agent.pt` will be visible in the W&B run's **Files** tab.
+
+<Tip>
+Choose `CHECKPOINT_FREQUENCY` carefully. Saving too often adds overhead; saving too rarely means losing more progress on interruption. A value between 10 and 100 updates is typical.
+</Tip>
+
+## Resuming from a checkpoint
+
+Extend the training loop with a resume block that runs before the main loop. When W&B detects a resumed run (`wandb.run.resumed`), the block downloads the last checkpoint and loads it into the agent before training begins.
+
+```python
+num_updates = args.total_timesteps // args.batch_size
+
+CHECKPOINT_FREQUENCY = 50
+starting_update = 1
+
+if args.track and wandb.run.resumed:
+    starting_update = run.summary.get("charts/update") + 1
+    global_step = starting_update * args.batch_size
+    api = wandb.Api()
+    run = api.run(f"{run.entity}/{run.project}/{run.id}")
+    model = run.file("agent.pt")
+    model.download(f"models/{experiment_name}/")
+    agent.load_state_dict(torch.load(
+        f"models/{experiment_name}/agent.pt", map_location=device))
+    agent.eval()
+    print(f"resumed at update {starting_update}")
+
+for update in range(starting_update, num_updates + 1):
+    # ... do rollouts and train models
+
+    if args.track:
+        if update % CHECKPOINT_FREQUENCY == 0:
+            torch.save(agent.state_dict(), f"{wandb.run.dir}/agent.pt")
+            wandb.save(f"{wandb.run.dir}/agent.pt", policy="now")
+```
+
+## Triggering resume mode
+
+To resume a run, you need the original W&B run ID. It appears in the run URL:
+
+```
+https://wandb.ai/costa-huang/cleanRL/runs/21421tda
+                                              ^^^^^^^^
+                                              run ID
+```
+
+Pass the ID via `WANDB_RUN_ID` and set `WANDB_RESUME=must` so W&B treats the new process as a continuation of the original run:
+
+```bash
+WANDB_RUN_ID=21421tda WANDB_RESUME=must python ppo_gridnet.py --prod-mode --capture_video
+```
+
+<Steps>
+  <Step title="Find your run ID">
+    Open the interrupted run in the W&B dashboard. Copy the ID from the URL — it is the alphanumeric string at the end, for example `21421tda`.
+  </Step>
+  <Step title="Check the checkpoint file">
+    Navigate to the **Files** tab in your W&B run to confirm `agent.pt` is present and was uploaded before the interruption.
+  </Step>
+  <Step title="Set environment variables and relaunch">
+    Prefix your original training command with `WANDB_RUN_ID=<id> WANDB_RESUME=must`. W&B will re-attach to the existing run, and the `wandb.run.resumed` flag will be `True`.
+  </Step>
+  <Step title="Verify resumption">
+    The script prints `resumed at update <N>` and training continues from the last checkpoint's update number rather than from zero.
+  </Step>
+</Steps>
+
+<Note>
+The `wandb.run.resumed` flag is only `True` when `WANDB_RESUME` is set to `must` or `allow` and W&B successfully reconnects to an existing run. Without this environment variable, the flag is `False` and the resume block is skipped — training starts from scratch.
+</Note>
+
+<Warning>
+`WANDB_RESUME=must` will raise an error if the run ID is not found. Use `WANDB_RESUME=allow` if you want the script to start a new run when no matching ID exists.
+</Warning>

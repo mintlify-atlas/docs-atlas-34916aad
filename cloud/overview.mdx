@@ -1,0 +1,81 @@
+---
+title: "Cloud & Scaling: Run Experiments at Scale"
+description: "Scale CleanRL experiments to thousands of parallel runs using Docker containers and AWS Batch, with W&B tracking every job automatically."
+---
+
+CleanRL's cloud integration lets you move from a single local training run to thousands of concurrent experiments without changing your algorithm code. The system packages your code into a Docker container, provisions AWS Batch compute environments via Terraform, and streams all metrics to Weights & Biases.
+
+## Architecture
+
+The end-to-end flow has four stages:
+
+1. **Local** — write or modify a single-file algorithm (e.g. `cleanrl/ppo.py`)
+2. **Docker** — build a container image from the repo's `Dockerfile` that includes your latest code
+3. **AWS Batch** — submit one job per seed/environment to a managed job queue; Batch schedules them across a fleet of spot or on-demand EC2 instances
+4. **W&B tracking** — each container job receives your `WANDB_API_KEY` at runtime and logs metrics automatically
+
+<Note>
+AWS Batch compute environments and job queues cost nothing to provision. You are only charged for EC2 instance time while jobs are actually running.
+</Note>
+
+## Docker support
+
+The repository ships a `Dockerfile` based on `nvidia/cuda:11.4.2-runtime-ubuntu20.04`. It installs system dependencies, copies `pyproject.toml` and `uv.lock`, runs `uv pip install .`, and then copies the `cleanrl/` source tree. A companion `entrypoint.sh` starts a virtual framebuffer (`Xvfb`) so headless video capture works inside the container.
+
+```dockerfile
+FROM nvidia/cuda:11.4.2-runtime-ubuntu20.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && \
+    apt-get -y install python3-pip xvfb ffmpeg git build-essential python-opengl
+
+RUN pip install uv --upgrade
+COPY pyproject.toml pyproject.toml
+COPY uv.lock uv.lock
+RUN uv pip install .
+
+COPY entrypoint.sh /usr/local/bin/
+RUN chmod 777 /usr/local/bin/entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+
+COPY ./cleanrl /cleanrl
+```
+
+## Prerequisites
+
+Before setting up cloud scaling you need:
+
+- An **AWS account** with credentials configured (`aws configure`)
+- A **Weights & Biases account** — jobs receive your API key via the `WANDB_API_KEY` environment variable
+- **Docker** with `buildx` support for building and pushing images
+- **Terraform** ≥ 0.14.9 for provisioning AWS Batch infrastructure
+- CleanRL installed with the `cloud` extras:
+
+```bash
+uv pip install ".[cloud]"
+```
+
+## What AWS Batch provides
+
+The Terraform configuration in `cloud/main.tf` provisions job queues backed by a mixed fleet of instance types:
+
+| Instance | vCPU | Memory | GPU | Notes |
+|---|---|---|---|---|
+| `g4dn.xlarge` | 4 | 16 GB | 1 | Accelerated spot |
+| `g4dn.4xlarge` | 16 | 64 GB | 1 | Accelerated spot |
+| `c5a.large` | 2 | 4 GB | — | Compute-optimized spot |
+| `r5ad.large` | 2 | 16 GB | — | Memory-optimized spot |
+| `m6gd.medium` | 1 | 4 GB | — | ARM, lowest cost |
+
+Spot instances are bid at 50% of the on-demand price. On-demand queues are also available for jobs that cannot tolerate interruption.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="AWS Batch setup" icon="aws" href="/cloud/aws-batch">
+    Step-by-step guide: provision infrastructure, build images, and submit experiments
+  </Card>
+  <Card title="Experiment tracking" icon="chart-line" href="/get-started/experiment-tracking">
+    Configure W&B and Tensorboard for local and cloud runs
+  </Card>
+</CardGroup>

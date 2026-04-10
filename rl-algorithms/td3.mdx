@@ -1,0 +1,136 @@
+---
+title: "Twin Delayed Deep Deterministic Policy Gradient (TD3)"
+description: "Off-policy continuous control with twin critics, delayed policy updates, and target policy smoothing. Covers PyTorch and JAX variants for MuJoCo."
+---
+
+Twin Delayed Deep Deterministic Policy Gradient (TD3) extends [DDPG](/rl-algorithms/ddpg) with three techniques that substantially improve stability and performance: **Clipped Double Q-Learning** (two critic networks, take the minimum) to reduce overestimation, **Delayed Policy Updates** (actor updated less frequently than critics) to reduce variance, and **Target Policy Smoothing** (noise added to target actions) to prevent the policy from exploiting sharp Q-value peaks.
+
+**Original paper:**
+
+- [Addressing Function Approximation Error in Actor-Critic Methods](https://arxiv.org/abs/1802.09477) — Fujimoto et al., 2018
+
+## Variants
+
+<CardGroup cols={2}>
+  <Card title="td3_continuous_action.py" icon="github" href="https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/td3_continuous_action.py">
+    PyTorch implementation for continuous action spaces. Supports `--save-model` and `--upload-model`.
+  </Card>
+  <Card title="td3_continuous_action_jax.py" icon="github" href="https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/td3_continuous_action_jax.py">
+    JAX/Flax/Optax implementation. Roughly 2.5–4× faster than the PyTorch variant on the same hardware.
+  </Card>
+</CardGroup>
+
+## `td3_continuous_action.py`
+
+This variant targets continuous control environments with `Box` observation and action spaces. It is based on [sfujim/TD3](https://github.com/sfujim/TD3), with support for asymmetric action space bounds.
+
+### Installation and usage
+
+<Tabs>
+  <Tab title="uv">
+    ```bash
+    uv pip install ".[mujoco]"
+    uv run python cleanrl/td3_continuous_action.py --help
+    uv run python cleanrl/td3_continuous_action.py --env-id Hopper-v4
+    uv run python cleanrl/td3_continuous_action.py --env-id HalfCheetah-v4
+    uv run python cleanrl/td3_continuous_action.py --env-id Walker2d-v4
+    ```
+  </Tab>
+  <Tab title="pip">
+    ```bash
+    pip install -r requirements/requirements-mujoco.txt
+    python cleanrl/td3_continuous_action.py --help
+    python cleanrl/td3_continuous_action.py --env-id Hopper-v4
+    python cleanrl/td3_continuous_action.py --env-id HalfCheetah-v4
+    ```
+  </Tab>
+</Tabs>
+
+### Hyperparameters
+
+<AccordionGroup>
+  <Accordion title="Core algorithm hyperparameters">
+    | Parameter | Default | Description |
+    |-----------|---------|-------------|
+    | `--env-id` | `Hopper-v4` | Environment ID |
+    | `--total-timesteps` | `1000000` | Total training timesteps |
+    | `--learning-rate` | `3e-4` | Optimizer learning rate (shared for actor and critics) |
+    | `--buffer-size` | `1000000` | Replay buffer capacity |
+    | `--gamma` | `0.99` | Discount factor γ |
+    | `--tau` | `0.005` | Target network smoothing coefficient |
+    | `--batch-size` | `256` | Minibatch size for updates |
+    | `--learning-starts` | `25000` | Timesteps before learning begins |
+    | `--policy-frequency` | `2` | Actor update delay (critic updated every step) |
+    | `--policy-noise` | `0.2` | Scale of target policy smoothing noise |
+    | `--noise-clip` | `0.5` | Clipping range for target policy smoothing noise |
+    | `--exploration-noise` | `0.1` | Scale of exploration noise added to actor output |
+  </Accordion>
+</AccordionGroup>
+
+### Key implementation details
+
+CleanRL's TD3 uses two separate Q-network objects (unlike the original which wraps both in one `Critic` class) and handles asymmetric action bounds by computing `action_scale` and `action_bias`:
+
+```python
+class Actor(nn.Module):
+    def __init__(self, env):
+        ...
+        # action rescaling
+        self.register_buffer("action_scale", torch.FloatTensor((env.action_space.high - env.action_space.low) / 2.0))
+        self.register_buffer("action_bias", torch.FloatTensor((env.action_space.high + env.action_space.low) / 2.0))
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = torch.tanh(self.fc_mu(x))
+        return x * self.action_scale + self.action_bias
+```
+
+Exploration noise is also centered at `action_bias` and scaled by `action_scale * exploration_noise`, so it works correctly for environments with non-standard action bounds (e.g., `Humanoid-v2` with `[-0.4, 0.4]`).
+
+### Experiment results
+
+| Environment | `td3_continuous_action.py` | TD3 paper (Fujimoto et al., 2018) |
+|-------------|---------------------------|-----------------------------------|
+| HalfCheetah-v4 | 9583.22 ± 126.09 | 9636.95 ± 859.07 |
+| Walker2d-v4 | 4057.59 ± 658.78 | 4682.82 ± 539.64 |
+| Hopper-v4 | 3134.61 ± 360.18 | 3564.07 ± 114.74 |
+| InvertedPendulum-v4 | 968.99 ± 25.80 | 1000.00 ± 0.00 |
+| Humanoid-v4 | 5035.36 ± 21.67 | — |
+
+<Note>
+  The original TD3 paper used MuJoCo v1 environments and evaluated with deterministic policy (no exploration noise). CleanRL reports training return with MuJoCo v4 environments.
+</Note>
+
+---
+
+## `td3_continuous_action_jax.py`
+
+This variant uses [JAX](https://github.com/google/jax), [Flax](https://github.com/google/flax), and [Optax](https://github.com/deepmind/optax) instead of PyTorch. It achieves roughly 2.5–4× faster wall-clock training than the PyTorch variant.
+
+### Installation and usage
+
+<Tabs>
+  <Tab title="uv">
+    ```bash
+    uv pip install ".[mujoco,jax]"
+    uv run python cleanrl/td3_continuous_action_jax.py --help
+    uv run python cleanrl/td3_continuous_action_jax.py --env-id Hopper-v4
+    uv run python cleanrl/td3_continuous_action_jax.py --env-id HalfCheetah-v4
+    ```
+  </Tab>
+  <Tab title="pip">
+    ```bash
+    pip install -r requirements/requirements-mujoco.txt
+    pip install -r requirements/requirements-jax.txt
+    python cleanrl/td3_continuous_action_jax.py --help
+    python cleanrl/td3_continuous_action_jax.py --env-id Hopper-v4
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  JAX does not support Windows natively. The JAX team recommends using Windows Subsystem for Linux (WSL) to run JAX-based variants.
+</Warning>
+
+The hyperparameters and logged metrics are identical to `td3_continuous_action.py`. See the sections above for details.

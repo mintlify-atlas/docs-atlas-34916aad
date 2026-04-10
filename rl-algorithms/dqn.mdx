@@ -1,0 +1,230 @@
+---
+title: "Deep Q-Learning (DQN) — CleanRL variants"
+description: "Single-file DQN implementations for classic control and Atari in PyTorch and JAX, with replay buffer, target network, and HuggingFace model hub support."
+---
+
+DQN extends Q-learning with two key contributions: a **replay buffer** that breaks temporal correlations in the training data, and a **target network** that provides stable regression targets. CleanRL's DQN implementations are based on the [Nature DQN paper](https://www.nature.com/articles/nature14236) with several practical improvements including Adam optimizer, Polyak target network updates, and proper handling of truncation vs. termination.
+
+**Original paper:** [Human-level control through deep reinforcement learning](https://www.nature.com/articles/nature14236) (Mnih et al., 2015)
+
+## Variants
+
+<CardGroup cols={2}>
+  <Card title="dqn.py" icon="gamepad-2" href="#dqnpy">
+    Classic control tasks. MLP network, discrete actions.
+  </Card>
+  <Card title="dqn_atari.py" icon="tv" href="#dqn_ataripy">
+    Atari games. Nature CNN, frame stacking, Atari preprocessing.
+  </Card>
+  <Card title="dqn_jax.py" icon="bolt" href="#dqn_jaxpy">
+    Classic control in JAX. ~50% faster than `dqn.py`.
+  </Card>
+  <Card title="dqn_atari_jax.py" icon="microchip" href="#dqn_atari_jaxpy">
+    Atari in JAX. ~25–50% faster than `dqn_atari.py`.
+  </Card>
+</CardGroup>
+
+## `dqn.py`
+
+[`dqn.py`](https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/dqn.py) targets classic control environments with a simple MLP Q-network.
+
+**Supports:**
+- `Box` observation space (low-level features)
+- `Discrete` action space
+- Environments like `CartPole-v1`, `Acrobot-v1`, `MountainCar-v0`
+- `--save-model` and `--upload-model` for HuggingFace Hub
+
+### Installation and usage
+
+<CodeGroup>
+
+```bash uv
+uv pip install .
+uv run python cleanrl/dqn.py --env-id CartPole-v1
+```
+
+```bash pip
+pip install .
+python cleanrl/dqn.py --env-id CartPole-v1
+```
+
+</CodeGroup>
+
+### Key hyperparameters
+
+<AccordionGroup>
+  <Accordion title="Algorithm hyperparameters">
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--env-id` | `CartPole-v1` | Gymnasium environment ID |
+| `--total-timesteps` | `500000` | Total environment steps |
+| `--learning-rate` | `2.5e-4` | Adam optimizer learning rate |
+| `--num-envs` | `1` | Number of parallel environments |
+| `--buffer-size` | `10000` | Replay memory capacity |
+| `--gamma` | `0.99` | Discount factor |
+| `--tau` | `1.0` | Target network update rate (1.0 = hard update) |
+| `--target-network-frequency` | `500` | Steps between target network updates |
+| `--batch-size` | `128` | Mini-batch size for training |
+| `--start-e` | `1.0` | Starting epsilon for ε-greedy exploration |
+| `--end-e` | `0.05` | Final epsilon after annealing |
+| `--exploration-fraction` | `0.5` | Fraction of training spent annealing epsilon |
+| `--learning-starts` | `10000` | Steps before training begins |
+| `--train-frequency` | `10` | Steps between each training update |
+
+  </Accordion>
+  <Accordion title="Model saving and HuggingFace Hub">
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--save-model` | `False` | Save model checkpoint to `runs/{run_name}/` |
+| `--upload-model` | `False` | Upload saved model to HuggingFace Hub |
+| `--hf-entity` | `""` | HuggingFace user or organization name |
+
+  </Accordion>
+</AccordionGroup>
+
+### Benchmark results
+
+| Environment | `dqn.py` |
+|-------------|----------|
+| CartPole-v1 | 488.69 ± 16.11 |
+| Acrobot-v1 | -91.54 ± 7.20 |
+| MountainCar-v0 | -194.95 ± 8.48 |
+
+### HuggingFace model hub
+
+`dqn.py` can save and upload trained models directly to the HuggingFace Hub:
+
+```bash
+python cleanrl/dqn.py --env-id CartPole-v1 \
+    --save-model \
+    --upload-model \
+    --hf-entity your-username
+```
+
+---
+
+## `dqn_atari.py`
+
+[`dqn_atari.py`](https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/dqn_atari.py) implements DQN for Atari with the Nature CNN, standard Atari preprocessing wrappers, and frame stacking.
+
+**Supports:**
+- Atari pixel observations `(210, 160, 3)`
+- `Discrete` action space
+- `--save-model` and `--upload-model` for HuggingFace Hub
+
+<Note>
+  CleanRL's `dqn_atari.py` uses Adam instead of RMSProp and trains for 10M timesteps instead of 50M, yet matches or exceeds the original paper's scores at 50M steps.
+</Note>
+
+### Installation and usage
+
+<CodeGroup>
+
+```bash uv
+uv pip install ".[atari]"
+uv run python cleanrl/dqn_atari.py --env-id BreakoutNoFrameskip-v4
+uv run python cleanrl/dqn_atari.py --env-id PongNoFrameskip-v4
+```
+
+```bash pip
+pip install -r requirements/requirements-atari.txt
+python cleanrl/dqn_atari.py --env-id BreakoutNoFrameskip-v4
+python cleanrl/dqn_atari.py --env-id PongNoFrameskip-v4
+```
+
+</CodeGroup>
+
+### Benchmark results
+
+| Environment | `dqn_atari.py` (10M steps) | Mnih et al. (50M steps) |
+|-------------|---------------------------|--------------------------|
+| BreakoutNoFrameskip-v4 | 366.93 ± 39.89 | 401.2 ± 26.9 |
+| PongNoFrameskip-v4 | 20.25 ± 0.41 | 18.9 ± 1.3 |
+| BeamRiderNoFrameskip-v4 | 6673.24 ± 1434.37 | 6846 ± 1619 |
+
+---
+
+## `dqn_atari_jax.py`
+
+[`dqn_atari_jax.py`](https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/dqn_atari_jax.py) reimplements `dqn_atari.py` using JAX, Flax, and Optax, achieving approximately 25–50% faster wall-clock training time.
+
+**Supports:**
+- Atari pixel observations
+- `Discrete` action space
+- JAX/Flax/Optax training loop
+
+### Installation and usage
+
+<CodeGroup>
+
+```bash uv
+uv pip install ".[atari,jax]"
+uv pip install --upgrade "jax[cuda11_cudnn82]==0.4.8" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+uv run python cleanrl/dqn_atari_jax.py --env-id BreakoutNoFrameskip-v4
+uv run python cleanrl/dqn_atari_jax.py --env-id PongNoFrameskip-v4
+```
+
+```bash pip
+pip install -r requirements/requirements-atari.txt
+pip install -r requirements/requirements-jax.txt
+pip install --upgrade "jax[cuda]==0.3.17" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+python cleanrl/dqn_atari_jax.py --env-id BreakoutNoFrameskip-v4
+python cleanrl/dqn_atari_jax.py --env-id PongNoFrameskip-v4
+```
+
+</CodeGroup>
+
+<Warning>
+  JAX does not support Windows. Use Windows Subsystem for Linux (WSL) if needed.
+</Warning>
+
+### Benchmark results
+
+| Environment | `dqn_atari_jax.py` (10M) | `dqn_atari.py` (10M) | Mnih et al. (50M) |
+|-------------|--------------------------|----------------------|---------------------|
+| BreakoutNoFrameskip-v4 | 377.82 ± 34.91 | 366.93 ± 39.89 | 401.2 ± 26.9 |
+| PongNoFrameskip-v4 | 20.43 ± 0.34 | 20.25 ± 0.41 | 18.9 ± 1.3 |
+| BeamRiderNoFrameskip-v4 | 5938.13 ± 955.84 | 6673.24 ± 1434.37 | 6846 ± 1619 |
+
+---
+
+## `dqn_jax.py`
+
+[`dqn_jax.py`](https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/dqn_jax.py) reimplements `dqn.py` using JAX for classic control tasks, achieving approximately 50% faster wall-clock time.
+
+**Supports:**
+- `Box` observation space (low-level features)
+- `Discrete` action space
+- Environments like `CartPole-v1`
+
+### Installation and usage
+
+<CodeGroup>
+
+```bash uv
+uv pip install --upgrade "jax[cuda11_cudnn82]==0.4.8" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+uv run python cleanrl/dqn_jax.py --env-id CartPole-v1
+```
+
+```bash pip
+pip install -r requirements/requirements-jax.txt
+pip install --upgrade "jax[cuda]==0.3.17" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+python cleanrl/dqn_jax.py --env-id CartPole-v1
+```
+
+</CodeGroup>
+
+<Warning>
+  JAX does not support Windows. Use Windows Subsystem for Linux (WSL) if needed.
+</Warning>
+
+## Logged metrics
+
+| Metric | Description |
+|--------|-------------|
+| `charts/episodic_return` | Episodic return of the agent |
+| `charts/SPS` | Environment steps per second |
+| `losses/td_loss` | MSE between predicted Q-values and Bellman targets |
+| `losses/q_values` | Average Q-values of sampled replay buffer transitions |

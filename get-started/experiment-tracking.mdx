@@ -1,0 +1,114 @@
+---
+title: "Track experiments with Tensorboard and Weights & Biases"
+description: "Log training metrics locally with Tensorboard, sync runs to Weights & Biases with --track, capture gameplay videos, and understand what CleanRL logs."
+---
+
+CleanRL has two built-in experiment tracking mechanisms: **Tensorboard** for local logging (enabled by default on every run) and **Weights & Biases** for cloud-based tracking, team collaboration, and video uploads. Both work out of the box with no extra configuration.
+
+## Tensorboard (default)
+
+Every CleanRL script writes training metrics to the `runs/` directory automatically. You do not need to pass any extra flags.
+
+```bash
+python cleanrl/ppo.py \
+    --seed 1 \
+    --env-id CartPole-v1 \
+    --total-timesteps 500000
+```
+
+Once the run has started, open a second terminal and launch Tensorboard:
+
+```bash
+tensorboard --logdir runs
+```
+
+Navigate to `http://localhost:6006` to view episodic return, learning rate, loss curves, and other metrics in real time.
+
+<Note>
+  We recommend the `uv venv` workflow so that `tensorboard` and `python` both resolve to the same virtual environment. Activate with `uv venv` before running either command.
+</Note>
+
+## Weights & Biases
+
+To sync a run to Weights & Biases, add the `--track` flag. You only need to log in once per machine.
+
+<Steps>
+  <Step title="Log in to Weights & Biases">
+    ```bash
+    wandb login
+    ```
+
+    Follow the prompt to paste your API key from [wandb.ai/authorize](https://wandb.ai/authorize). This stores credentials locally and only needs to be done once.
+  </Step>
+  <Step title="Start a tracked run">
+    ```bash
+    uv venv
+    python cleanrl/ppo.py --track --capture_video
+    ```
+
+    Combining `--track` with `--capture_video` uploads gameplay videos directly to your W&B run page alongside all logged metrics.
+  </Step>
+  <Step title="Open the run dashboard">
+    After the run starts, the console prints the project and run URLs:
+
+    ```
+    wandb:  View project at https://wandb.ai/costa-huang/cleanRL
+    wandb:  View run at https://wandb.ai/costa-huang/cleanRL/runs/10dwbgeh
+    ```
+
+    Open the run URL to view charts, system metrics, and videos.
+  </Step>
+</Steps>
+
+## W&B project and entity flags
+
+You can control which W&B project and team the run is logged to using two additional flags.
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--wandb-project-name` | `cleanRL` | The W&B project name to log the run under |
+| `--wandb-entity` | `None` | The W&B entity (user or team) that owns the project |
+
+```bash
+python cleanrl/ppo.py \
+    --track \
+    --wandb-project-name my-rl-project \
+    --wandb-entity my-team
+```
+
+<Tip>
+  Leave `--wandb-entity` unset to log runs to your personal account. Set it to a team name when collaborating on shared experiments.
+</Tip>
+
+## Video capture with experiment tracking
+
+The `--capture_video` flag saves MP4 recordings of the agent's gameplay to `videos/{run_name}/`. When combined with `--track`, these videos are automatically uploaded to the W&B run dashboard.
+
+```bash
+python cleanrl/ppo.py \
+    --seed 1 \
+    --env-id CartPole-v1 \
+    --total-timesteps 500000 \
+    --capture_video \
+    --track \
+    --wandb-project-name cleanrltest
+```
+
+<Warning>
+  Video capture adds overhead to training. For benchmarking wall-clock speed, run without `--capture_video`.
+</Warning>
+
+## What gets logged
+
+CleanRL logs the following categories of data during training:
+
+| Category | Examples |
+| --- | --- |
+| Episode metrics | Episodic return, episode length |
+| Learning rate | Annealed learning rate schedule |
+| Policy losses | Policy gradient loss, entropy loss, value function loss |
+| Training diagnostics | Approximate KL divergence, clip fraction, explained variance |
+| System metrics (W&B) | GPU utilisation, CPU utilisation, memory usage |
+| Videos (W&B only) | Agent gameplay recordings (requires `--capture_video`) |
+
+All Tensorboard data lives in `runs/` and persists locally. Weights & Biases data is synced to the cloud and accessible to anyone with project access.

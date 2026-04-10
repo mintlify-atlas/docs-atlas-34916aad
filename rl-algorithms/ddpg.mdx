@@ -1,0 +1,150 @@
+---
+title: "Deep Deterministic Policy Gradient (DDPG)"
+description: "Off-policy deterministic actor-critic with replay buffer and target networks for continuous control. Covers PyTorch and JAX variants for MuJoCo."
+---
+
+Deep Deterministic Policy Gradient (DDPG) extends DQN to continuous action spaces by introducing a deterministic actor that directly outputs actions. The algorithm combines a replay buffer and target networks (borrowed from DQN) with an actor-critic architecture to learn stable policies in continuous control tasks.
+
+Compared to [TD3](/rl-algorithms/td3), DDPG uses only a single critic network and does not apply target policy smoothing noise or delayed actor updates. In practice, TD3 tends to outperform DDPG on most benchmarks due to these additions.
+
+**Original paper:**
+
+- [Continuous control with deep reinforcement learning](https://arxiv.org/abs/1509.02971) — Lillicrap et al., 2016
+
+## Variants
+
+<CardGroup cols={2}>
+  <Card title="ddpg_continuous_action.py" icon="github" href="https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ddpg_continuous_action.py">
+    PyTorch implementation for continuous action spaces. Supports `--save-model` and `--upload-model`.
+  </Card>
+  <Card title="ddpg_continuous_action_jax.py" icon="github" href="https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ddpg_continuous_action_jax.py">
+    JAX/Flax/Optax implementation. Roughly 2.5–4× faster than the PyTorch variant on the same hardware.
+  </Card>
+</CardGroup>
+
+## `ddpg_continuous_action.py`
+
+This variant is based on [sfujim/TD3's OurDDPG.py](https://github.com/sfujim/TD3/blob/master/OurDDPG.py) and targets continuous control environments with `Box` observation and action spaces.
+
+### Installation and usage
+
+<Tabs>
+  <Tab title="uv">
+    ```bash
+    uv pip install ".[mujoco]"
+    uv run python cleanrl/ddpg_continuous_action.py --help
+    uv run python cleanrl/ddpg_continuous_action.py --env-id Hopper-v4
+    uv run python cleanrl/ddpg_continuous_action.py --env-id HalfCheetah-v4
+    uv run python cleanrl/ddpg_continuous_action.py --env-id Walker2d-v4
+    ```
+  </Tab>
+  <Tab title="pip">
+    ```bash
+    pip install -r requirements/requirements-mujoco.txt
+    python cleanrl/ddpg_continuous_action.py --help
+    python cleanrl/ddpg_continuous_action.py --env-id Hopper-v4
+    python cleanrl/ddpg_continuous_action.py --env-id HalfCheetah-v4
+    ```
+  </Tab>
+</Tabs>
+
+### Hyperparameters
+
+<AccordionGroup>
+  <Accordion title="Core algorithm hyperparameters">
+    | Parameter | Default | Description |
+    |-----------|---------|-------------|
+    | `--env-id` | `Hopper-v4` | Environment ID |
+    | `--total-timesteps` | `1000000` | Total training timesteps |
+    | `--learning-rate` | `3e-4` | Learning rate for both actor and critic (Adam) |
+    | `--buffer-size` | `1000000` | Replay buffer capacity |
+    | `--gamma` | `0.99` | Discount factor γ |
+    | `--tau` | `0.005` | Target network smoothing coefficient |
+    | `--batch-size` | `256` | Minibatch size for updates |
+    | `--exploration-noise` | `0.1` | Scale of Gaussian exploration noise |
+    | `--learning-starts` | `25000` | Timesteps before learning begins |
+    | `--policy-frequency` | `2` | Actor update frequency |
+  </Accordion>
+</AccordionGroup>
+
+### Differences from the original paper
+
+| Detail | CleanRL's `ddpg_continuous_action.py` | Lillicrap et al. (2016) |
+|--------|--------------------------------------|-------------------------|
+| Exploration noise | Gaussian N(0, 0.1) | Ornstein-Uhlenbeck (θ=0.15, σ=0.2) |
+| Network width | 256 units per hidden layer | 400/300 units per hidden layer |
+| Learning rate | 3e-4 for both actor and critic | 1e-4 (critic), 1e-3 (actor) |
+| Batch size | 256 | 64 |
+| Tau | 0.005 | 0.001 |
+
+### Key implementation details
+
+CleanRL's DDPG handles asymmetric action space bounds (e.g., `Humanoid-v2` with `[-0.4, 0.4]`) using `action_scale` and `action_bias`:
+
+```python
+class Actor(nn.Module):
+    def __init__(self, env):
+        super().__init__()
+        self.fc1 = nn.Linear(np.array(env.single_observation_space.shape).prod(), 256)
+        self.fc2 = nn.Linear(256, 256)
+        self.fc_mu = nn.Linear(256, np.prod(env.single_action_space.shape))
+        # action rescaling
+        self.register_buffer(
+            "action_scale", torch.tensor((env.action_space.high - env.action_space.low) / 2.0, dtype=torch.float32)
+        )
+        self.register_buffer(
+            "action_bias", torch.tensor((env.action_space.high + env.action_space.low) / 2.0, dtype=torch.float32)
+        )
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = torch.tanh(self.fc_mu(x))
+        return x * self.action_scale + self.action_bias
+```
+
+### Experiment results
+
+| Environment | `ddpg_continuous_action.py` | OurDDPG.py (Fujimoto et al., 2018) |
+|-------------|-----------------------------|------------------------------------|
+| HalfCheetah-v4 | 10374.07 ± 157.37 | 8577.29 |
+| Walker2d-v4 | 1240.16 ± 390.10 | 3098.11 |
+| Hopper-v4 | 1576.78 ± 818.98 | 1860.02 |
+| Humanoid-v4 | 1699.56 ± 694.22 | — |
+
+<Note>
+  The reference implementation used MuJoCo v1 environments and evaluated in deterministic mode (no exploration noise). CleanRL uses MuJoCo v4 and reports training-time episodic return.
+</Note>
+
+---
+
+## `ddpg_continuous_action_jax.py`
+
+This variant uses [JAX](https://github.com/google/jax), [Flax](https://github.com/google/flax), and [Optax](https://github.com/deepmind/optax) instead of PyTorch. It achieves roughly 2.5–4× faster wall-clock training than the PyTorch variant.
+
+### Installation and usage
+
+<Tabs>
+  <Tab title="uv">
+    ```bash
+    uv pip install ".[mujoco,jax]"
+    uv run python cleanrl/ddpg_continuous_action_jax.py --help
+    uv run python cleanrl/ddpg_continuous_action_jax.py --env-id Hopper-v4
+    uv run python cleanrl/ddpg_continuous_action_jax.py --env-id HalfCheetah-v4
+    ```
+  </Tab>
+  <Tab title="pip">
+    ```bash
+    pip install -r requirements/requirements-mujoco.txt
+    pip install -r requirements/requirements-jax.txt
+    python cleanrl/ddpg_continuous_action_jax.py --help
+    python cleanrl/ddpg_continuous_action_jax.py --env-id Hopper-v4
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  JAX does not support Windows natively. The JAX team recommends using Windows Subsystem for Linux (WSL) to run JAX-based variants.
+</Warning>
+
+The hyperparameters and logged metrics are identical to `ddpg_continuous_action.py`. See the sections above for details.

@@ -1,0 +1,175 @@
+---
+title: "Soft Actor-Critic (SAC) for Continuous and Discrete Control"
+description: "Off-policy, entropy-maximizing RL for continuous and discrete action spaces. Covers sac_continuous_action.py and sac_atari.py with MuJoCo and Atari usage."
+---
+
+Soft Actor-Critic (SAC) is an off-policy actor-critic algorithm that maximizes a trade-off between expected return and policy entropy. Unlike [DDPG](/rl-algorithms/ddpg) and [TD3](/rl-algorithms/td3), SAC uses a stochastic policy, which enables natural exploration and can represent multi-modal optimal behaviors. SAC also uses two soft Q-networks to reduce overestimation bias, and supports automatic tuning of the entropy coefficient α.
+
+**Original papers:**
+
+- [Reinforcement Learning with Deep Energy-Based Policies](https://arxiv.org/abs/1702.08165)
+- [Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor](https://arxiv.org/abs/1801.01290)
+- [Soft Actor-Critic Algorithms and Applications](https://arxiv.org/abs/1812.05905)
+- [Soft Actor-Critic for Discrete Action Settings](https://arxiv.org/abs/1910.07207)
+
+## Variants
+
+<CardGroup cols={2}>
+  <Card title="sac_continuous_action.py" icon="github" href="https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/sac_continuous_action.py">
+    For continuous action spaces (MuJoCo, Box observation and action spaces). Supports automatic entropy tuning.
+  </Card>
+  <Card title="sac_atari.py" icon="github" href="https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/sac_atari.py">
+    For discrete action spaces (Atari). Uses a shared Nature-CNN backbone and action-probability-weighted objectives.
+  </Card>
+</CardGroup>
+
+## `sac_continuous_action.py`
+
+This variant targets continuous control environments with `Box` observation and action spaces. It uses a numerically stable stochastic actor based on the [SpinningUp](https://github.com/openai/spinningup) implementation.
+
+### Installation and usage
+
+<Tabs>
+  <Tab title="uv">
+    ```bash
+    uv pip install ".[mujoco]"
+    uv run python cleanrl/sac_continuous_action.py --help
+    uv run python cleanrl/sac_continuous_action.py --env-id Hopper-v4
+    uv run python cleanrl/sac_continuous_action.py --env-id HalfCheetah-v4
+    # Disable automatic entropy tuning
+    uv run python cleanrl/sac_continuous_action.py --env-id Hopper-v4 --autotune False --alpha 0.2
+    ```
+  </Tab>
+  <Tab title="pip">
+    ```bash
+    pip install -r requirements/requirements-mujoco.txt
+    python cleanrl/sac_continuous_action.py --help
+    python cleanrl/sac_continuous_action.py --env-id Hopper-v4
+    python cleanrl/sac_continuous_action.py --env-id HalfCheetah-v4
+    # Disable automatic entropy tuning
+    python cleanrl/sac_continuous_action.py --env-id Hopper-v4 --autotune False --alpha 0.2
+    ```
+  </Tab>
+</Tabs>
+
+### Hyperparameters
+
+<AccordionGroup>
+  <Accordion title="Core algorithm hyperparameters">
+    | Parameter | Default | Description |
+    |-----------|---------|-------------|
+    | `--env-id` | `Hopper-v4` | Environment ID |
+    | `--total-timesteps` | `1000000` | Total training timesteps |
+    | `--buffer-size` | `1000000` | Replay buffer capacity |
+    | `--gamma` | `0.99` | Discount factor γ |
+    | `--tau` | `0.005` | Target network smoothing coefficient |
+    | `--batch-size` | `256` | Minibatch size for updates |
+    | `--learning-starts` | `5000` | Timesteps before learning begins |
+    | `--policy-lr` | `3e-4` | Learning rate for the policy network |
+    | `--q-lr` | `1e-3` | Learning rate for the Q networks (also used for α tuning) |
+    | `--policy-frequency` | `2` | Actor update frequency (delayed) |
+    | `--target-network-frequency` | `1` | Target network update frequency |
+    | `--alpha` | `0.2` | Entropy regularization coefficient (used when `--autotune False`) |
+    | `--autotune` | `True` | Automatically tune the entropy coefficient α |
+  </Accordion>
+</AccordionGroup>
+
+### Key implementation details
+
+The actor uses a numerically stable log-std clamping scheme (note `LOG_STD_MIN = -5`, not `-20` as in SpinningUp):
+
+```python
+LOG_STD_MAX = 2
+LOG_STD_MIN = -5
+
+def get_action(self, x):
+    mean, log_std = self(x)
+    std = log_std.exp()
+    normal = torch.distributions.Normal(mean, std)
+    x_t = normal.rsample()  # reparameterization trick
+    y_t = torch.tanh(x_t)
+    action = y_t * self.action_scale + self.action_bias
+    log_prob = normal.log_prob(x_t)
+    # Enforcing Action Bound
+    log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
+    log_prob = log_prob.sum(1, keepdim=True)
+    return action, log_prob, mean
+```
+
+When `--autotune` is enabled, the entropy coefficient α is optimized using the Q-network learning rate:
+
+```python
+if args.autotune:
+    target_entropy = -torch.prod(torch.Tensor(envs.single_action_space.shape).to(device)).item()
+    log_alpha = torch.zeros(1, requires_grad=True, device=device)
+    alpha = log_alpha.exp().item()
+    a_optimizer = optim.Adam([log_alpha], lr=args.q_lr)
+else:
+    alpha = args.alpha
+```
+
+### Experiment results
+
+| Environment | `sac_continuous_action.py` | SAC paper (1M steps) |
+|-------------|---------------------------|----------------------|
+| HalfCheetah-v2 | 9634.89 ± 1423.73 | ~11,250 |
+| Walker2d-v2 | 3591.45 ± 911.33 | ~4,800 |
+| Hopper-v2 | 2310.46 ± 342.82 | ~3,250 |
+| Humanoid-v4 | 4996.29 ± 686.40 | ~4,500 |
+
+<Note>
+  CleanRL reports training episodic return, while the SAC paper reports evaluation return with the policy in deterministic mode.
+</Note>
+
+---
+
+## `sac_atari.py`
+
+This variant adapts SAC to discrete action spaces using a categorical policy and shared Nature-CNN network. It uses action-probability-weighted objectives throughout (critic, actor, and α tuning) to reduce gradient variance.
+
+### Installation and usage
+
+<Tabs>
+  <Tab title="uv">
+    ```bash
+    uv pip install ".[atari]"
+    uv run python cleanrl/sac_atari.py --env-id PongNoFrameskip-v4
+    uv run python cleanrl/sac_atari.py --env-id BreakoutNoFrameskip-v4
+    # Disable automatic entropy tuning
+    uv run python cleanrl/sac_atari.py --env-id PongNoFrameskip-v4 --autotune False --alpha 0.2
+    ```
+  </Tab>
+  <Tab title="pip">
+    ```bash
+    pip install -r requirements/requirements-atari.txt
+    python cleanrl/sac_atari.py --env-id PongNoFrameskip-v4
+    python cleanrl/sac_atari.py --env-id BreakoutNoFrameskip-v4
+    ```
+  </Tab>
+</Tabs>
+
+### Key implementation details
+
+In the discrete setting the Q-function maps states to Q-values for all actions, so full action distributions are used instead of Monte Carlo sampling. This reduces gradient variance in both the critic and actor:
+
+```python
+# Critic target using full action distribution
+min_qf_next_target = next_state_action_probs * (
+    torch.min(qf1_next_target, qf2_next_target) - alpha * next_state_log_pi
+)
+
+# Actor loss using action probability weighting
+actor_loss = (action_probs * ((alpha * log_pi) - min_qf_values)).mean()
+```
+
+<Note>
+  `sac_atari.py` uses `--target-entropy-scale=0.89` (vs. `0.98` in the original paper) for improved stability during longer training runs. Updates are performed every nth environment step rather than every step.
+</Note>
+
+### Experiment results
+
+| Environment | `sac_atari.py` (100k steps) | Paper (100k steps) | `sac_atari.py` (5M steps) |
+|-------------|-----------------------------|--------------------|---------------------------|
+| PongNoFrameskip-v4 | ~-20.21 ± 0.62 | -20.98 ± 0.0 | ~19.24 ± 1.81 |
+| BreakoutNoFrameskip-v4 | ~2.33 ± 1.28 | — | ~343.66 ± 93.34 |
+| BeamRiderNoFrameskip-v4 | ~396.15 ± 155.81 | 432.1 ± 44.0 | ~8658.97 ± 1554.66 |
